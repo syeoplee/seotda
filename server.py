@@ -460,6 +460,23 @@ class Handler(BaseHTTPRequestHandler):
                         do_die(h, pid)
                     players[pid]["seat"] = None
                 self._send(200, {"ok": True})
+        elif self.path == "/kick":
+            with lock:
+                seat = data.get("seat")
+                # 착석한 플레이어만 강퇴할 수 있고, 자기 자신은 못 내보낸다
+                if players.get(pid, {}).get("seat") is None:
+                    self._send(403, {"error": "착석한 플레이어만 강퇴할 수 있습니다"})
+                    return
+                target = next((q for q, p in players.items()
+                               if p["seat"] == seat and q != pid), None)
+                if target is None:
+                    self._send(409, {"error": "그 자리에 내보낼 사람이 없습니다"})
+                    return
+                h = game["hand"]
+                if game["phase"] == "betting" and h and target in h.get("alive", []):
+                    do_die(h, target)
+                players[target]["seat"] = None      # 관전으로 내려감
+                self._send(200, {"ok": True})
         elif self.path == "/reset_table":
             with lock:
                 if pid not in players:

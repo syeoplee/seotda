@@ -47,6 +47,12 @@
     font-size: 11px; padding: 1px 7px; border-radius: 9px; font-weight: 700;
   }
   .seat .cards { display: flex; gap: 4px; margin-top: 5px; }
+  .seat .kick {
+    position: absolute; top: -8px; left: -6px; width: 20px; height: 20px; padding: 0;
+    background: #7a3a3a; color: #fff; border: 0; border-radius: 50%;
+    font-size: 12px; line-height: 20px; cursor: pointer; opacity: .55;
+  }
+  .seat .kick:hover { opacity: 1; background: #9c4646; }
 
   .card {
     width: 34px; height: 50px; border-radius: 5px; position: relative;
@@ -297,6 +303,7 @@ const playWin  = () => [440, 550, 660, 880].forEach((f, i) => beep(f, i * .18, .
 let myId = sessionStorage.getItem("seotda-id");
 let prev = {phase: null, myTurn: false};
 let gPhase = "lobby", gWinners = [], shownResult = null, shownNotice = 0;
+let iSeated = false, prevSeated = false, iLeft = false;
 
 // 터널(외부) 접속자는 자기 접속 주소를, 랜 접속자는 서버가 알려준 랜 주소를 공유용으로 본다
 const displayUrl = u =>
@@ -314,7 +321,11 @@ async function api(path, body) {
   return d;
 }
 
+let joining = false;   // 중복 착석(더블클릭) 방지
 async function join(want, name) {
+  if (joining) return;                       // 이미 처리 중이면 무시
+  if (want) { $("sitBtn").disabled = $("specBtn").disabled = true; }
+  joining = true;
   try {
     const d = await api("/join", {id: myId, want, name});
     if (!d.id) { $("pick").hidden = false; return; }
@@ -324,6 +335,9 @@ async function join(want, name) {
     $("pick").hidden = true;
   } catch (e) {
     $("pickErr").textContent = e.message;
+  } finally {
+    joining = false;
+    $("sitBtn").disabled = $("specBtn").disabled = false;
   }
 }
 
@@ -416,6 +430,16 @@ function seatEl(s) {
   if (s.dealer) {
     const b = document.createElement("span");
     b.className = "badge"; b.textContent = "선"; el.appendChild(b);
+  }
+  if (iSeated && !s.me) {                 // 착석한 사람은 남을 강퇴 가능
+    const k = document.createElement("button");
+    k.className = "kick"; k.textContent = "✕"; k.title = "강퇴";
+    k.onclick = (e) => {
+      e.stopPropagation();
+      if (confirm(s.name + " 님을 자리에서 내보낼까요?"))
+        api("/kick", {id: myId, seat: s.seat}).catch(err => alert(err.message));
+    };
+    el.appendChild(k);
   }
   const nm = document.createElement("div");
   nm.className = "nm"; nm.textContent = s.name + (s.me ? " (나)" : "");
@@ -583,6 +607,10 @@ function render(d) {
   else $("wanrow").hidden = true;
   gPhase = d.phase;
   gWinners = d.result ? d.result.winners : [];
+  iSeated = !!(d.me && d.me.seat != null);
+  // 내가 방금 자리를 잃었는데 스스로 나간 게 아니면 = 강퇴됨
+  if (prevSeated && !iSeated && !iLeft) showToast("강퇴되었습니다 — 관전으로 전환됐어요");
+  prevSeated = iSeated; iLeft = false;
   // 멍텅구리 구사 등 재경기 토스트
   if (d.notice && d.notice.at !== shownNotice) { shownNotice = d.notice.at; showToast(d.notice.msg); }
   // 승자 배너 (결과가 새로 나올 때 한 번)
@@ -678,8 +706,10 @@ $("ddadangBtn").onclick = () => act("ddadang");
 $("halfBtn").onclick = () => act("half");
 $("nextBtn").onclick = () => api("/next", {id: myId}).catch(e => alert(e.message));
 $("leaveBtn").onclick = () => {
-  if (confirm("자리를 비우고 관전으로 전환할까요? (진행 중이면 다이 처리됩니다)"))
+  if (confirm("자리를 비우고 관전으로 전환할까요? (진행 중이면 다이 처리됩니다)")) {
+    iLeft = true;
     api("/leave", {id: myId}).catch(() => {});
+  }
 };
 $("rechargeBtn").onclick = () => api("/recharge", {id: myId}).catch(() => {});
 $("sit2Btn").onclick = () => join("seat");
