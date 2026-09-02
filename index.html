@@ -164,11 +164,15 @@
     display: flex; align-items: center; justify-content: center;
   }
   #peek .box { background: #33302a; border-radius: 16px; padding: 22px 34px; text-align: center; }
-  #peekCards { display: flex; gap: 16px; justify-content: center; margin: 18px 0 12px; }
-  #peekCards .card.big, #peekCards .peelwrap { width: 116px; height: 168px; }
-  #peekCards .card.big { font-size: 58px; }
-  #peekCards .card.big .mnum { font-size: 22px; line-height: 28px; }
-  #peekCards .peelcover { font-size: 15px; }
+  #peekCards { display: flex; justify-content: center; margin: 14px 0 12px; }
+  #peekCards .card.big { font-size: 84px; }
+  #peekCards .card.big .mnum { font-size: 30px; line-height: 38px; padding: 0 8px; }
+  .squeeze { position: relative; width: 172px; height: 445px; touch-action: none; }
+  .squeeze .card.big.sq { position: absolute; left: 0; top: 0; width: 172px; height: 250px; }
+  #peekCards .card.big .gw { width: 32px; height: 32px; font-size: 18px; }
+  .sq-bottom { z-index: 1; }
+  .sq-top { z-index: 2; cursor: grab; box-shadow: 0 8px 14px rgba(0,0,0,.55); }
+  .sq-top:active { cursor: grabbing; }
   #peekHint { font-size: 14px; opacity: .9; margin-bottom: 12px; }
   #peekDone { font-size: 16px; padding: 10px 30px; }
   #confetti { position: fixed; inset: 0; z-index: 19; pointer-events: none; overflow: hidden; }
@@ -261,7 +265,7 @@
   <div class="box">
     <div style="font-weight:700; font-size:18px">내 패</div>
     <div id="peekCards"></div>
-    <div id="peekHint">두 번째 패를 <span style="color:#9fd4ff">아래로 ▼ 밀어서</span> 까세요</div>
+    <div id="peekHint">위 패를 <span style="color:#9fd4ff">아래로 ▼ 밀어</span> 두 번째 패를 확인하세요</div>
     <button id="peekDone" hidden>확인</button>
   </div>
 </div>
@@ -556,19 +560,54 @@ function refreshMyHand(seat) {
     seat.cards.forEach(() => hand.appendChild(cardEl("hidden", true)));
 }
 
-// 시작할 때 큰 창: 첫 패는 바로, 둘째 패는 아래로 밀어서 까기
+// 두 패가 겹쳐 있고, 위(첫) 패를 아래로 슬라이드하면 밑의 둘째 패가 드러난다
+function makeSqueeze(topCard, bottomCard, onReveal) {
+  const box = document.createElement("div");
+  box.className = "squeeze";
+  const cb = cardEl(bottomCard, true); cb.className += " sq sq-bottom";  // 밑에 깔린 둘째 패
+  const ct = cardEl(topCard, true);    ct.className += " sq sq-top";     // 위에 덮은 첫 패
+  box.append(cb, ct);
+  let done = false, y = 0, dragging = false, startY = 0, base = 0, moved = false;
+  const maxSlide = () => ct.offsetHeight * 0.72;   // 둘째 패 대부분 드러날 만큼
+  const set = v => {
+    y = Math.max(0, Math.min(maxSlide(), v));
+    ct.style.transform = "translateY(" + y + "px)";
+    if (!done && y >= maxSlide() * 0.5) { done = true; playPeel(); onReveal(); }
+  };
+  ct.addEventListener("pointerdown", e => {
+    dragging = true; moved = false; startY = e.clientY; base = y;
+    ct.style.transition = "";
+    try { ct.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  ct.addEventListener("pointermove", e => {
+    if (!dragging) return;
+    if (Math.abs(e.clientY - startY) > 3) moved = true;
+    set(base + (e.clientY - startY));
+  });
+  const end = () => {
+    if (!dragging) return;
+    dragging = false;
+    ct.style.transition = "transform .2s ease";
+    if (!moved || y >= maxSlide() * 0.35) set(maxSlide());  // 탭/절반이상 -> 끝까지
+    else set(0);                                            // 살짝 -> 도로
+    setTimeout(() => { ct.style.transition = ""; }, 220);
+  };
+  ct.addEventListener("pointerup", end);
+  ct.addEventListener("pointercancel", end);
+  return box;
+}
+
+// 시작할 때 큰 창: 두 패가 겹쳐있고 첫 패를 내려 둘째 패를 확인
 function showPeek(seat) {
   const box = $("peekCards");
   box.innerHTML = "";
-  box.appendChild(cardEl(seat.cards[0], true));          // 첫 패 오픈
-  const w = makePeelCard(seat.cards[1], () => {          // 둘째 패 밀어서 까기
+  box.appendChild(makeSqueeze(seat.cards[0], seat.cards[1], () => {
     peeled2 = true;
     updateRank(seat);
     refreshMyHand(seat);
     $("peekHint").hidden = true;
     $("peekDone").hidden = false;
-  });
-  box.appendChild(w);
+  }));
   $("peekHint").hidden = false;
   $("peekDone").hidden = true;
   $("peek").hidden = false;
