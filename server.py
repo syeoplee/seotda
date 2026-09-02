@@ -87,20 +87,25 @@ def evaluate(cards):
     return (4, k, "망통" if k == 0 else ("갑오" if k == 9 else f"{k}끗"))
 
 
+def _has(cards, m, i):
+    return any(c["m"] == m and c["i"] == i for c in cards)
+
+
 def catcher(cards):
-    """특수 잡이패: 땡잡이(3+7)·암행어사(4+7)·멍텅구리 구사(4+9)."""
+    """특수 잡이패 (족보표 기준, 특정 카드 필요).
+    땡잡이 = 3월광 + 7월멧돼지, 암행어사 = 4월열끗 + 7월멧돼지, 구사 = 4 + 9."""
     ms = sorted(c["m"] for c in cards)
-    if ms == [3, 7]:
+    if ms == [3, 7] and _has(cards, 3, 0) and _has(cards, 7, 0):
         return "땡잡이"
-    if ms == [4, 7]:
+    if ms == [4, 7] and _has(cards, 4, 0) and _has(cards, 7, 0):
         return "암행어사"
     if ms == [4, 9]:
         return "구사"
     return None
 
 
-def redeal(h):
-    """멍텅구리 구사: 판돈은 유지한 채 살아있는 사람에게 패를 다시 돌린다."""
+def redeal(h, notice_msg, reveal=None):
+    """판돈은 유지한 채 살아있는 사람에게 패를 다시 돌린다 (구사·무승부 재경기)."""
     deck = make_deck()
     for p in h["alive"]:
         h["cards"][p] = [deck.pop(), deck.pop()]
@@ -114,7 +119,7 @@ def redeal(h):
     h["result"] = None
     h["turnAt"] = time.time()
     game["phase"] = "betting"
-    game["notice"] = {"msg": "멍텅구리 구사(9+4)! 재경기합니다 🔄", "at": time.time()}
+    game["notice"] = {"msg": notice_msg, "at": time.time(), "reveal": reveal}
 
 
 def seated_in_order():
@@ -190,23 +195,40 @@ def showdown(h, fold_winner=None):
         }
         return
     alive = h["alive"]
-    # 멍텅구리 구사: 살아있는 사람 중 4+9가 있으면 재경기
-    if any(catcher(h["cards"][p]) == "구사" for p in alive):
-        redeal(h)
-        return
     evals = {p: evaluate(h["cards"][p]) for p in alive}
+
+    def is_gwang(p):    # 광땡 (tier 0 또는 1)
+        return evals[p][0] <= 1
+
+    def is_jangddaeng(p):   # 장땡 (10땡)
+        return evals[p][0] == 2 and evals[p][1] == 10
+
+    # 구사: 상대에 광땡·장땡(재대결 불가 패)이 없으면 패 공개 후 재경기
+    gusa = [p for p in alive if catcher(h["cards"][p]) == "구사"]
+    if gusa:
+        blocked = any(is_gwang(p) or is_jangddaeng(p)
+                      for p in alive if p not in gusa)
+        if not blocked:
+            reveal = {players[p]["name"]: h["cards"][p] for p in gusa}
+            redeal(h, "멍텅구리 구사(9+4)! 재경기합니다 🔄", reveal)
+            return
     best = min((evals[p][0], -evals[p][1]) for p in alive)
     top = [p for p in alive if (evals[p][0], -evals[p][1]) == best]
-    top_tier, top_name = evals[top[0]][0], evals[top[0]][2]
+    top_tier, top_val, top_name = evals[top[0]][0], evals[top[0]][1], evals[top[0]][2]
     winners, catch = top, None
-    if top_tier == 2:                      # 최고패가 땡 -> 땡잡이(3+7)가 잡음
+    if top_tier == 2 and top_val != 10:    # 땡(장땡 제외) -> 땡잡이가 잡음
         tj = [p for p in alive if catcher(h["cards"][p]) == "땡잡이"]
         if tj:
             winners, catch = tj, "땡잡이"
-    elif top_tier == 1:                    # 최고패가 13/18광땡 -> 암행어사(4+7)가 잡음
+    elif top_tier == 1:                    # 13/18광땡 -> 암행어사가 잡음 (38광땡 제외)
         ah = [p for p in alive if catcher(h["cards"][p]) == "암행어사"]
         if ah:
             winners, catch = ah, "암행어사"
+    # 같은 패(무승부)면 재경기 — 패를 공개하고 다시 돌린다
+    if len(winners) > 1 and not catch:
+        reveal = {players[p]["name"]: h["cards"][p] for p in winners}
+        redeal(h, "같은 패 무승부! 재경기합니다 🔄", reveal)
+        return
     share, rem = divmod(h["pot"], len(winners))
     for i, p in enumerate(winners):
         players[p]["chips"] += share + (rem if i == 0 else 0)

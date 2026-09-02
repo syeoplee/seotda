@@ -158,6 +158,19 @@
   #winCards { display: flex; gap: 10px; justify-content: center; margin: 14px 0 4px; }
   #winCards .card.big { width: 78px; height: 114px; animation: winpop .5s cubic-bezier(.2,1.3,.4,1); }
   #winSub { font-size: 18px; margin-top: 6px; color: #ffd97a; }
+
+  #peek {
+    position: fixed; inset: 0; background: rgba(0,0,0,.72); z-index: 15;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #peek .box { background: #33302a; border-radius: 16px; padding: 22px 34px; text-align: center; }
+  #peekCards { display: flex; gap: 16px; justify-content: center; margin: 18px 0 12px; }
+  #peekCards .card.big, #peekCards .peelwrap { width: 116px; height: 168px; }
+  #peekCards .card.big { font-size: 58px; }
+  #peekCards .card.big .mnum { font-size: 22px; line-height: 28px; }
+  #peekCards .peelcover { font-size: 15px; }
+  #peekHint { font-size: 14px; opacity: .9; margin-bottom: 12px; }
+  #peekDone { font-size: 16px; padding: 10px 30px; }
   #confetti { position: fixed; inset: 0; z-index: 19; pointer-events: none; overflow: hidden; }
   #confetti i {
     position: absolute; top: -20px; width: 10px; height: 14px; border-radius: 2px;
@@ -244,6 +257,15 @@
 </div>
 <div id="toast" hidden></div>
 
+<div id="peek" hidden>
+  <div class="box">
+    <div style="font-weight:700; font-size:18px">내 패</div>
+    <div id="peekCards"></div>
+    <div id="peekHint">두 번째 패를 <span style="color:#9fd4ff">아래로 ▼ 밀어서</span> 까세요</div>
+    <button id="peekDone" hidden>확인</button>
+  </div>
+</div>
+
 <div id="pick" hidden>
   <div class="box">
     <div style="font-size:17px; font-weight:600">섯다에 참가합니다</div>
@@ -268,8 +290,11 @@ function evalHand(cards) {
   if (ms[0] === 3 && ms[1] === 8 && gwang) return "38광땡";
   if (ms[0] === 1 && (ms[1] === 3 || ms[1] === 8) && gwang) return "1" + ms[1] + "광땡";
   if (ms[0] === ms[1]) return ms[0] === 10 ? "장땡" : ms[0] + "땡";
-  const cat = {"3,7":"땡잡이","4,7":"암행어사","4,9":"구사"};
-  if (cat[ms.join(",")]) return cat[ms.join(",")];
+  const has = (m, i) => cards.some(c => c.m === m && c.i === i);
+  const key = ms.join(",");
+  if (key === "4,9") return "구사";
+  if (key === "3,7" && has(3, 0) && has(7, 0)) return "땡잡이";   // 3월광+7월멧돼지
+  if (key === "4,7" && has(4, 0) && has(7, 0)) return "암행어사"; // 4월열끗+7월멧돼지
   const sp = {"1,2":"알리","1,4":"독사","1,9":"구삥","1,10":"장삥","4,10":"장사","4,6":"세륙"};
   if (sp[ms.join(",")]) return sp[ms.join(",")];
   const k = (ms[0] + ms[1]) % 10;
@@ -380,8 +405,8 @@ const JOKBO = [
   {k: "세륙",   cards: [[4,0],[6,0]], note: "4+6"},
   {k: "끗",     cards: [[4,0],[5,0]], note: "갑오(9) > … > 1끗"},
   {k: "망통",   cards: [[2,0],[8,0]], note: "0끗"},
-  {k: "땡잡이", cards: [[3,0],[7,0]], note: "3+7·땡 잡음"},
-  {k: "암행어사", cards: [[4,0],[7,0]], note: "4+7·광땡 잡음"},
+  {k: "땡잡이", cards: [[3,0],[7,0]], note: "3+7월멧돼지·땡 잡음"},
+  {k: "암행어사", cards: [[4,0],[7,0]], note: "4+7월멧돼지·광땡 잡음"},
   {k: "구사",   cards: [[4,0],[9,0]], note: "4+9·재경기"},
 ];
 function buildJokbo() {
@@ -520,28 +545,43 @@ function makePeelCard(card, onReveal) {
   return wrap;
 }
 
-function buildMyHand(seat, phase) {
+// #myhand 를 상태에 맞게 다시 그린다 (안 깠으면 뒷면, 까면 앞면)
+function refreshMyHand(seat) {
   const hand = $("myhand");
   hand.innerHTML = "";
+  if (!seat || !seat.cards || seat.cards === "hidden") return;
+  if (peeled2 || gPhase !== "betting")
+    seat.cards.forEach(c => hand.appendChild(cardEl(c, true)));
+  else
+    seat.cards.forEach(() => hand.appendChild(cardEl("hidden", true)));
+}
+
+// 시작할 때 큰 창: 첫 패는 바로, 둘째 패는 아래로 밀어서 까기
+function showPeek(seat) {
+  const box = $("peekCards");
+  box.innerHTML = "";
+  box.appendChild(cardEl(seat.cards[0], true));          // 첫 패 오픈
+  const w = makePeelCard(seat.cards[1], () => {          // 둘째 패 밀어서 까기
+    peeled2 = true;
+    updateRank(seat);
+    refreshMyHand(seat);
+    $("peekHint").hidden = true;
+    $("peekDone").hidden = false;
+  });
+  box.appendChild(w);
+  $("peekHint").hidden = false;
+  $("peekDone").hidden = true;
+  $("peek").hidden = false;
+}
+
+function buildMyHand(seat, phase) {
   peeled2 = false;
   $("peelhint").hidden = true;
-  if (!seat || !seat.cards || seat.cards === "hidden") return;
-
-  // 판이 끝났으면(쇼다운) 두 장 다 오픈
-  if (phase !== "betting") {
-    seat.cards.forEach(c => hand.appendChild(cardEl(c, true)));
-    peeled2 = true;
-    return;
-  }
-
-  let opened = 0;
-  const onOne = () => {
-    opened++;
-    if (opened >= 2) { peeled2 = true; $("peelhint").hidden = true; updateRank(seat); }
-  };
-  hand.appendChild(makePeelCard(seat.cards[0], onOne));
-  hand.appendChild(makePeelCard(seat.cards[1], onOne));
-  $("peelhint").hidden = false;
+  $("peek").hidden = true;
+  if (!seat || !seat.cards || seat.cards === "hidden") { $("myhand").innerHTML = ""; return; }
+  if (phase !== "betting") { peeled2 = true; refreshMyHand(seat); return; }
+  refreshMyHand(seat);      // 뒷면
+  showPeek(seat);           // 큰 창 까기
 }
 
 function updateRank(seat) {
@@ -601,6 +641,21 @@ function showWinner(result, me, seats) {
   clearTimeout(showWinner._t);
   showWinner._t = setTimeout(() => { b.hidden = true; }, 4200);
 }
+// 구사·무승부 재경기 — 공개된 패를 배너로 보여준다
+function showNotice(notice) {
+  $("winTitle").textContent = notice.msg;
+  $("winTitle").style.color = "#9fd4ff";
+  $("winSub").textContent = "재경기합니다";
+  const wc = $("winCards"); wc.innerHTML = "";
+  if (notice.reveal)
+    Object.values(notice.reveal).forEach(cards =>
+      cards.forEach(c => wc.appendChild(cardEl(c, true))));
+  const b = $("winbanner");
+  b.hidden = false;
+  b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop");
+  clearTimeout(showWinner._t);
+  showWinner._t = setTimeout(() => { b.hidden = true; }, 3800);
+}
 
 function render(d) {
   if (d.wan) { $("wanrow").hidden = false; $("wanurl").textContent = d.wan; }
@@ -611,8 +666,11 @@ function render(d) {
   // 내가 방금 자리를 잃었는데 스스로 나간 게 아니면 = 강퇴됨
   if (prevSeated && !iSeated && !iLeft) showToast("강퇴되었습니다 — 관전으로 전환됐어요");
   prevSeated = iSeated; iLeft = false;
-  // 멍텅구리 구사 등 재경기 토스트
-  if (d.notice && d.notice.at !== shownNotice) { shownNotice = d.notice.at; showToast(d.notice.msg); }
+  // 멍텅구리 구사·무승부 재경기 (패 공개 배너 또는 토스트)
+  if (d.notice && d.notice.at !== shownNotice) {
+    shownNotice = d.notice.at;
+    if (d.notice.reveal) showNotice(d.notice); else showToast(d.notice.msg);
+  }
   // 승자 배너 (결과가 새로 나올 때 한 번)
   const sig = d.result ? d.result.msg : null;
   if (sig && sig !== shownResult) { shownResult = sig; showWinner(d.result, d.me, d.seats); }
@@ -720,6 +778,7 @@ $("resetTableBtn").onclick = () => {
 };
 $("sitBtn").onclick = () => join("seat", $("nameInput").value);
 $("specBtn").onclick = () => join("spec", $("nameInput").value);
+$("peekDone").onclick = () => { $("peek").hidden = true; };
 
 buildJokbo();
 (async () => {
