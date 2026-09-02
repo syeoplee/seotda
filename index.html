@@ -128,6 +128,45 @@
     background: #4a4030; border: 1px solid #8a7a55; border-radius: 12px;
     padding: 10px 14px; font-size: 16px; font-weight: 600; text-align: center;
   }
+  .seat.winnerseat {
+    border-color: #ffd54a;
+    box-shadow: 0 0 18px rgba(255,213,74,.85), inset 0 0 12px rgba(255,213,74,.3);
+    animation: winglow 1s ease-in-out infinite alternate;
+  }
+  @keyframes winglow { from { box-shadow: 0 0 10px rgba(255,213,74,.6); }
+                       to { box-shadow: 0 0 26px rgba(255,213,74,.95); } }
+
+  #winbanner {
+    position: fixed; inset: 0; z-index: 20; pointer-events: none;
+    display: flex; align-items: center; justify-content: center; flex-direction: column;
+  }
+  #winbanner .card2 {
+    background: linear-gradient(160deg, #4a3d1e, #2b230f);
+    border: 2px solid #ffd54a; border-radius: 16px; padding: 26px 46px; text-align: center;
+    box-shadow: 0 12px 40px rgba(0,0,0,.6);
+  }
+  #winbanner.pop .card2 { animation: winpop .5s cubic-bezier(.2,1.3,.4,1); }
+  @keyframes winpop { 0% { transform: scale(.5); opacity: 0; }
+                      100% { transform: scale(1); opacity: 1; } }
+  #winTitle { font-size: 34px; font-weight: 800; }
+  #winCards { display: flex; gap: 10px; justify-content: center; margin: 14px 0 4px; }
+  #winCards .card.big { width: 78px; height: 114px; animation: winpop .5s cubic-bezier(.2,1.3,.4,1); }
+  #winSub { font-size: 18px; margin-top: 6px; color: #ffd97a; }
+  #confetti { position: fixed; inset: 0; z-index: 19; pointer-events: none; overflow: hidden; }
+  #confetti i {
+    position: absolute; top: -20px; width: 10px; height: 14px; border-radius: 2px;
+    animation: fall 2.4s linear forwards;
+  }
+  @keyframes fall { to { transform: translateY(105vh) rotate(720deg); opacity: .9; } }
+  #toast {
+    position: fixed; left: 50%; top: 18%; transform: translateX(-50%);
+    background: #2b3b6b; color: #eaf1ff; border: 1px solid #5a7ad0;
+    padding: 12px 20px; border-radius: 10px; font-size: 16px; font-weight: 600;
+    z-index: 21; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  }
+  #toast.show { animation: toastin .3s ease; }
+  @keyframes toastin { from { opacity: 0; transform: translate(-50%, -12px); }
+                       to { opacity: 1; transform: translate(-50%, 0); } }
 
   #pick {
     position: fixed; inset: 0; background: rgba(0,0,0,.65);
@@ -189,6 +228,16 @@
 <div id="jokbo"></div>
 </div>
 
+<div id="confetti"></div>
+<div id="winbanner" hidden>
+  <div class="card2">
+    <div id="winTitle"></div>
+    <div id="winCards"></div>
+    <div id="winSub"></div>
+  </div>
+</div>
+<div id="toast" hidden></div>
+
 <div id="pick" hidden>
   <div class="box">
     <div style="font-size:17px; font-weight:600">섯다에 참가합니다</div>
@@ -213,7 +262,9 @@ function evalHand(cards) {
   if (ms[0] === 3 && ms[1] === 8 && gwang) return "38광땡";
   if (ms[0] === 1 && (ms[1] === 3 || ms[1] === 8) && gwang) return "1" + ms[1] + "광땡";
   if (ms[0] === ms[1]) return ms[0] === 10 ? "장땡" : ms[0] + "땡";
-  const sp = {"1,2":"알리","1,4":"독사","9,10":"구삥","1,10":"장삥","4,10":"장사","4,6":"세륙"};
+  const cat = {"3,7":"땡잡이","4,7":"암행어사","4,9":"구사"};
+  if (cat[ms.join(",")]) return cat[ms.join(",")];
+  const sp = {"1,2":"알리","1,4":"독사","1,9":"구삥","1,10":"장삥","4,10":"장사","4,6":"세륙"};
   if (sp[ms.join(",")]) return sp[ms.join(",")];
   const k = (ms[0] + ms[1]) % 10;
   return k === 0 ? "망통" : (k === 9 ? "갑오" : k + "끗");
@@ -245,6 +296,7 @@ const playWin  = () => [440, 550, 660, 880].forEach((f, i) => beep(f, i * .18, .
 /* state */
 let myId = sessionStorage.getItem("seotda-id");
 let prev = {phase: null, myTurn: false};
+let gPhase = "lobby", gWinners = [], shownResult = null, shownNotice = 0;
 
 // 터널(외부) 접속자는 자기 접속 주소를, 랜 접속자는 서버가 알려준 랜 주소를 공유용으로 본다
 const displayUrl = u =>
@@ -308,12 +360,15 @@ const JOKBO = [
   {k: "땡",     cards: [[10,0],[10,0]], note: "장땡 > … > 1땡"},
   {k: "알리",   cards: [[1,0],[2,0]], note: "1+2"},
   {k: "독사",   cards: [[1,0],[4,0]], note: "1+4"},
-  {k: "구삥",   cards: [[9,0],[10,0]], note: "9+10"},
+  {k: "구삥",   cards: [[1,0],[9,0]], note: "1+9"},
   {k: "장삥",   cards: [[1,0],[10,0]], note: "1+10"},
   {k: "장사",   cards: [[4,0],[10,0]], note: "4+10"},
   {k: "세륙",   cards: [[4,0],[6,0]], note: "4+6"},
   {k: "끗",     cards: [[4,0],[5,0]], note: "갑오(9) > … > 1끗"},
   {k: "망통",   cards: [[2,0],[8,0]], note: "0끗"},
+  {k: "땡잡이", cards: [[3,0],[7,0]], note: "3+7·땡 잡음"},
+  {k: "암행어사", cards: [[4,0],[7,0]], note: "4+7·광땡 잡음"},
+  {k: "구사",   cards: [[4,0],[9,0]], note: "4+9·재경기"},
 ];
 function buildJokbo() {
   const box = $("jokbo");
@@ -344,8 +399,9 @@ function buildJokbo() {
 function jokboKey(name) {
   if (!name) return null;
   if (name.endsWith("광땡")) return name;
+  if (["알리","독사","구삥","장삥","장사","세륙","망통",
+       "땡잡이","암행어사","구사"].includes(name)) return name;
   if (name.endsWith("땡")) return "땡";
-  if (["알리","독사","구삥","장삥","장사","세륙","망통"].includes(name)) return name;
   return "끗";   // N끗, 갑오
 }
 
@@ -356,6 +412,7 @@ function seatEl(s) {
   if (s.turn) el.classList.add("turn");
   if (s.me) el.classList.add("me");
   if (s.inHand && !s.alive) el.classList.add("die");
+  if (gPhase === "showdown" && gWinners.includes(s.name)) el.classList.add("winnerseat");
   if (s.dealer) {
     const b = document.createElement("span");
     b.className = "badge"; b.textContent = "선"; el.appendChild(b);
@@ -371,16 +428,18 @@ function seatEl(s) {
   if (s.cards) {
     const cs = document.createElement("div");
     cs.className = "cards";
-    if (s.cards === "hidden") cs.append(cardEl("hidden"), cardEl("hidden"));
+    // 내 패도 베팅 중엔 뒷면으로만 보인다 (미리 안 보이게 — 밑의 손패에서 밀어서 확인)
+    const backs = (s.cards === "hidden") || (s.me && gPhase === "betting");
+    if (backs) cs.append(cardEl("hidden"), cardEl("hidden"));
     else s.cards.forEach(c => cs.appendChild(cardEl(c)));
     el.appendChild(cs);
   }
   return el;
 }
 
-/* ---- 두 번째 패 밀어서 까기 ---- */
+/* ---- 두 장 모두 밀어서 까기 (실제 섯다처럼) ---- */
 let renderedHandKey = null;   // 현재 손패 DOM이 어떤 패로 그려졌는지
-let peel2 = 0, peeled2 = false;
+let peeled2 = false;          // 두 장 모두 깠는가
 const playPeel = () => { beep(700, 0, .07, .14, "sawtooth"); beep(430, .05, .12, .12, "sawtooth"); };
 
 function myHandKey(seat, phase) {
@@ -388,68 +447,77 @@ function myHandKey(seat, phase) {
   return seat.cards.map(c => c.m + "-" + c.i).join(",") + "|" + phase;
 }
 
-function buildMyHand(seat, phase) {
-  const hand = $("myhand");
-  hand.innerHTML = "";
-  peel2 = 0; peeled2 = false;
-  $("peelhint").hidden = true;
-  if (!seat || !seat.cards || seat.cards === "hidden") return;
-  hand.appendChild(cardEl(seat.cards[0], true));        // 첫 장은 바로 오픈
-
-  // 판이 끝났으면(쇼다운) 두 번째 장도 그냥 오픈
-  if (phase !== "betting") {
-    hand.appendChild(cardEl(seat.cards[1], true));
-    peeled2 = true;
-    return;
-  }
-
+// 카드 한 장에 커버를 씌우고, 아래로 밀면 까지는 요소를 만든다
+function makePeelCard(card, onReveal) {
   const wrap = document.createElement("div");
   wrap.className = "peelwrap";
-  wrap.appendChild(cardEl(seat.cards[1], true));        // 밑에 깔린 실제 패
+  wrap.appendChild(cardEl(card, true));            // 밑에 깔린 실제 패
   const cover = document.createElement("div");
   cover.className = "peelcover smooth";
   cover.innerHTML = "밀어서<br>까기";
   wrap.appendChild(cover);
-  hand.appendChild(wrap);
-  $("peelhint").hidden = false;
 
+  let done = false, peel = 0, dragging = false, startY = 0, base = 0, moved = false;
   const reveal = () => {
-    if (peeled2) return;
-    peeled2 = true;
+    if (done) return;
+    done = true;
     cover.classList.add("smooth");
     cover.style.clipPath = "inset(100% 0 0 0)";
-    $("peelhint").hidden = true;
     playPeel();
-    updateRank(seat);             // 다 까면 족보 이름/하이라이트 공개
+    onReveal();
   };
   const setPeel = v => {
-    if (peeled2) return;
-    peel2 = Math.max(0, Math.min(1, v));
-    cover.style.clipPath = "inset(" + (peel2 * 100) + "% 0 0 0)";  // 위→아래로 까임
-    if (peel2 >= 0.8) reveal();
+    if (done) return;
+    peel = Math.max(0, Math.min(1, v));
+    cover.style.clipPath = "inset(" + (peel * 100) + "% 0 0 0)";  // 위→아래로 까임
+    if (peel >= 0.8) reveal();
   };
-  let dragging = false, startY = 0, base = 0, moved = false;
   wrap.addEventListener("pointerdown", e => {
-    if (peeled2) return;
-    dragging = true; moved = false; startY = e.clientY; base = peel2;
+    if (done) return;
+    dragging = true; moved = false; startY = e.clientY; base = peel;
     cover.classList.remove("smooth");
     try { wrap.setPointerCapture(e.pointerId); } catch (err) {}
   });
   wrap.addEventListener("pointermove", e => {
-    if (!dragging || peeled2) return;
+    if (!dragging || done) return;
     if (Math.abs(e.clientY - startY) > 3) moved = true;
     setPeel(base + (e.clientY - startY) / wrap.offsetHeight);
   });
   const end = () => {
     if (!dragging) return;
     dragging = false;
-    if (peeled2) return;
+    if (done) return;
     cover.classList.add("smooth");
-    if (!moved || peel2 >= 0.4) reveal();   // 탭 또는 절반 넘게 밀면 오픈
-    else setPeel(0);                         // 살짝만 밀면 도로 덮임(약올리기)
+    if (!moved || peel >= 0.4) reveal();   // 탭 또는 절반 넘게 밀면 오픈
+    else setPeel(0);                        // 살짝만 밀면 도로 덮임(약올리기)
   };
   wrap.addEventListener("pointerup", end);
   wrap.addEventListener("pointercancel", end);
+  return wrap;
+}
+
+function buildMyHand(seat, phase) {
+  const hand = $("myhand");
+  hand.innerHTML = "";
+  peeled2 = false;
+  $("peelhint").hidden = true;
+  if (!seat || !seat.cards || seat.cards === "hidden") return;
+
+  // 판이 끝났으면(쇼다운) 두 장 다 오픈
+  if (phase !== "betting") {
+    seat.cards.forEach(c => hand.appendChild(cardEl(c, true)));
+    peeled2 = true;
+    return;
+  }
+
+  let opened = 0;
+  const onOne = () => {
+    opened++;
+    if (opened >= 2) { peeled2 = true; $("peelhint").hidden = true; updateRank(seat); }
+  };
+  hand.appendChild(makePeelCard(seat.cards[0], onOne));
+  hand.appendChild(makePeelCard(seat.cards[1], onOne));
+  $("peelhint").hidden = false;
 }
 
 function updateRank(seat) {
@@ -467,9 +535,60 @@ function updateRank(seat) {
     r.classList.toggle("hit", r.dataset.k === hitKey));
 }
 
+/* ---- 승자 배너 + 효과 ---- */
+function showToast(msg) {
+  const t = $("toast");
+  t.textContent = msg; t.hidden = false;
+  t.classList.remove("show"); void t.offsetWidth; t.classList.add("show");
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => { t.hidden = true; }, 3500);
+}
+function confettiBurst() {
+  const box = $("confetti");
+  box.innerHTML = "";
+  const cols = ["#ffd54a", "#ff6b6b", "#4ad6a0", "#5aa9ff", "#c77dff", "#ffffff"];
+  for (let i = 0; i < 40; i++) {
+    const p = document.createElement("i");
+    p.style.left = (10 + Math.random() * 80) + "%";
+    p.style.background = cols[i % cols.length];
+    p.style.animationDelay = (Math.random() * 0.3) + "s";
+    p.style.transform = "rotate(" + (Math.random() * 360) + "deg)";
+    box.appendChild(p);
+  }
+  setTimeout(() => { box.innerHTML = ""; }, 2600);
+}
+function showWinner(result, me, seats) {
+  const iWon = me && result.winners.includes(me.name);
+  $("winTitle").textContent = result.winners.join(", ") + " 승리! 🏆";
+  const hand = result.hand ||
+    (result.kind === "fold" ? "전원 다이" : "");
+  $("winSub").textContent = hand ? "(" + hand + ")" : "";
+  $("winTitle").style.color = iWon ? "#ffe07a" : "#e8e6e3";
+  // 이긴 사람의 실제 패를 크게 보여준다
+  const wc = $("winCards");
+  wc.innerHTML = "";
+  const wSeat = (seats || []).find(s => result.winners.includes(s.name) &&
+                                        Array.isArray(s.cards));
+  if (wSeat) wSeat.cards.forEach(c => wc.appendChild(cardEl(c, true)));
+  const b = $("winbanner");
+  b.hidden = false;
+  b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop");
+  if (result.kind !== "fold") confettiBurst();
+  clearTimeout(showWinner._t);
+  showWinner._t = setTimeout(() => { b.hidden = true; }, 4200);
+}
+
 function render(d) {
   if (d.wan) { $("wanrow").hidden = false; $("wanurl").textContent = d.wan; }
   else $("wanrow").hidden = true;
+  gPhase = d.phase;
+  gWinners = d.result ? d.result.winners : [];
+  // 멍텅구리 구사 등 재경기 토스트
+  if (d.notice && d.notice.at !== shownNotice) { shownNotice = d.notice.at; showToast(d.notice.msg); }
+  // 승자 배너 (결과가 새로 나올 때 한 번)
+  const sig = d.result ? d.result.msg : null;
+  if (sig && sig !== shownResult) { shownResult = sig; showWinner(d.result, d.me, d.seats); }
+  if (!sig) shownResult = null;
   const bySeat = {};
   d.seats.forEach(s => bySeat[s.seat] = s);
   $("row-top").innerHTML = ""; $("row-bottom").innerHTML = "";

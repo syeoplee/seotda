@@ -30,6 +30,7 @@ lock = threading.Lock()
 players = {}        # pid -> {"name","chips","seat":int|None,"seen":ts}
 game = {
     "phase": "lobby",   # lobby | betting | showdown
+    "notice": None,     # transient toast, e.g. 멍텅구리 구사 재경기
     "button": -1,       # seat number of the dealer button
     "hand": None,
 }
@@ -77,13 +78,43 @@ def evaluate(cards):
         return (1, ms[1], f"1{ms[1]}광땡")
     if ms[0] == ms[1]:
         return (2, ms[0], "장땡" if ms[0] == 10 else f"{ms[0]}땡")
-    specials = {(1, 2): ("알리", 6), (1, 4): ("독사", 5), (9, 10): ("구삥", 4),
+    specials = {(1, 2): ("알리", 6), (1, 4): ("독사", 5), (1, 9): ("구삥", 4),
                 (1, 10): ("장삥", 3), (4, 10): ("장사", 2), (4, 6): ("세륙", 1)}
     if tuple(ms) in specials:
         name, v = specials[tuple(ms)]
         return (3, v, name)
     k = (ms[0] + ms[1]) % 10
     return (4, k, "망통" if k == 0 else ("갑오" if k == 9 else f"{k}끗"))
+
+
+def catcher(cards):
+    """특수 잡이패: 땡잡이(3+7)·암행어사(4+7)·멍텅구리 구사(4+9)."""
+    ms = sorted(c["m"] for c in cards)
+    if ms == [3, 7]:
+        return "땡잡이"
+    if ms == [4, 7]:
+        return "암행어사"
+    if ms == [4, 9]:
+        return "구사"
+    return None
+
+
+def redeal(h):
+    """멍텅구리 구사: 판돈은 유지한 채 살아있는 사람에게 패를 다시 돌린다."""
+    deck = make_deck()
+    for p in h["alive"]:
+        h["cards"][p] = [deck.pop(), deck.pop()]
+    h["curBet"] = 0
+    h["bets"] = {p: 0 for p in h["order"]}
+    h["acted"] = {p: False for p in h["order"]}
+    for j in range(len(h["order"])):
+        if h["order"][j] in h["alive"]:
+            h["cur"] = j
+            break
+    h["result"] = None
+    h["turnAt"] = time.time()
+    game["phase"] = "betting"
+    game["notice"] = {"msg": "멍텅구리 구사(9+4)! 재경기합니다 🔄", "at": time.time()}
 
 
 def seated_in_order():
@@ -93,6 +124,7 @@ def seated_in_order():
 
 def start_hand():
     """Returns error string or None. Caller holds the lock."""
+    game["notice"] = None
     eligible = [pid for pid in seated_in_order() if players[pid]["chips"] >= ANTE]
     if len(eligible) < 2:
         return "참가 가능한 인원이 2명 미만입니다 (기본판돈 100 필요)"
@@ -157,20 +189,38 @@ def showdown(h, fold_winner=None):
             "reveal": {},
         }
         return
-    evals = {p: evaluate(h["cards"][p]) for p in h["alive"]}
-    best = min((e[0], -e[1]) for e in evals.values())
-    winners = [p for p, e in evals.items() if (e[0], -e[1]) == best]
+    alive = h["alive"]
+    # 멍텅구리 구사: 살아있는 사람 중 4+9가 있으면 재경기
+    if any(catcher(h["cards"][p]) == "구사" for p in alive):
+        redeal(h)
+        return
+    evals = {p: evaluate(h["cards"][p]) for p in alive}
+    best = min((evals[p][0], -evals[p][1]) for p in alive)
+    top = [p for p in alive if (evals[p][0], -evals[p][1]) == best]
+    top_tier, top_name = evals[top[0]][0], evals[top[0]][2]
+    winners, catch = top, None
+    if top_tier == 2:                      # 최고패가 땡 -> 땡잡이(3+7)가 잡음
+        tj = [p for p in alive if catcher(h["cards"][p]) == "땡잡이"]
+        if tj:
+            winners, catch = tj, "땡잡이"
+    elif top_tier == 1:                    # 최고패가 13/18광땡 -> 암행어사(4+7)가 잡음
+        ah = [p for p in alive if catcher(h["cards"][p]) == "암행어사"]
+        if ah:
+            winners, catch = ah, "암행어사"
     share, rem = divmod(h["pot"], len(winners))
     for i, p in enumerate(winners):
         players[p]["chips"] += share + (rem if i == 0 else 0)
     names = ", ".join(players[p]["name"] for p in winners)
+    handname = (catch + " (" + top_name + " 잡음)") if catch else evals[winners[0]][2]
     h["result"] = {
         "kind": "showdown",
         "winners": [players[p]["name"] for p in winners],
-        "msg": names + " 승리! (" + evals[winners[0]][2] + ", +"
+        "hand": handname,
+        "msg": names + " 승리! (" + handname + ", +"
                + f"{share:,}" + (")" if len(winners) == 1 else " 나눔)"),
-        "reveal": {p: {"cards": h["cards"][p], "name": evals[p][2]}
-                   for p in h["alive"]},
+        "reveal": {p: {"cards": h["cards"][p],
+                       "name": catcher(h["cards"][p]) or evals[p][2]}
+                   for p in alive},
     }
 
 
@@ -291,6 +341,7 @@ class Handler(BaseHTTPRequestHandler):
                        and h["order"][h["cur"]] == pid),
             "myBet": h["bets"].get(pid, 0) if h else 0,
             "result": h["result"] if h and game["phase"] == "showdown" else None,
+            "notice": game["notice"],
         }
         return view
 
