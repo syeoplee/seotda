@@ -528,7 +528,7 @@ const playWin  = () => [440, 550, 660, 880].forEach((f, i) => beep(f, i * .18, .
 /* state */
 let myId = sessionStorage.getItem("seotda-id");
 let prev = {phase: null, myTurn: false, needAct: false, round: 0};
-let gPhase = "lobby", gMode = 2, gWinners = [], shownResult = null, shownNotice = 0;
+let gPhase = "lobby", gMode = 2, gTableMode = 2, gWinners = [], shownResult = null, shownNotice = 0;
 let gRevealSeq = null, gRevealTimers = [];   // 쇼다운 순차 공개 (진 사람 → 이긴 사람)
 let iSeated = false, prevSeated = false, iLeft = false;
 const inProg = p => p === "open" || p === "betting" || p === "choose";   // 판 진행 중
@@ -1110,7 +1110,9 @@ function render(d) {
   if (d.wan) { $("wanrow").hidden = false; $("wanurl").textContent = d.wan; }
   else $("wanrow").hidden = true;
   gPhase = d.phase;
-  gMode = d.mode === 3 ? 3 : 2;
+  // gMode = 이번 판을 실제로 도는 장수 (구사 재경기면 3장 모드라도 2장)
+  gMode = (d.handMode || d.mode) === 3 ? 3 : 2;
+  gTableMode = d.mode === 3 ? 3 : 2;      // 테이블 설정 (모드 버튼 표시용)
   gWinners = d.result ? d.result.winners : [];
   iSeated = !!(d.me && d.me.seat != null);
   // 내가 방금 자리를 잃었는데 스스로 나간 게 아니면 = 강퇴됨
@@ -1131,7 +1133,9 @@ function render(d) {
   $("pot").textContent = "판돈 " + fmt(d.pot);
   $("modetag").textContent = gMode === 3
     ? "3장 섯다 — 1장 공개 → 1차 베팅 → 세 번째 패 → 2차 베팅 → 2장 선택"
-    : "2장 섯다";
+    : (gTableMode === 3 && inProg(d.phase)
+        ? "구사 재경기 — 이 판만 2장으로 승부"
+        : "2장 섯다");
   const seated = d.seats.length;
   const busy = inProg(d.phase);
   const pendingTxt = (d.pending || []).join(", ");
@@ -1191,8 +1195,8 @@ function render(d) {
   $("nextBtn").disabled = busy || seated < 2;
   $("nextBtn").textContent = d.phase === "showdown" ? "다음 판" : "게임 시작";
   $("moderow").hidden = !(seatedMe && !busy);      // 판 사이에만 모드 변경
-  $("mode2Btn").classList.toggle("active", gMode === 2);
-  $("mode3Btn").classList.toggle("active", gMode === 3);
+  $("mode2Btn").classList.toggle("active", gTableMode === 2);
+  $("mode3Btn").classList.toggle("active", gTableMode === 3);
   $("leaveBtn").hidden = !seatedMe;
   $("sit2Btn").hidden = !(d.me && d.me.seat == null && seated < 6);
   $("resetTableBtn").hidden = !myId;

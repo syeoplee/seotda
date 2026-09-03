@@ -156,7 +156,9 @@ def begin_betting(h, rnd):
 
 def finish_betting(h):
     """베팅 라운드가 끝났다: 3장 모드면 세 번째 패 → 2차 베팅 → 패 선택, 아니면 승부."""
-    if h["mode"] == 3 and h["round"] == 1:
+    if h.get("twoOnly"):        # 구사 재경기: 세 번째 패 없이 바로 승부
+        showdown(h)
+    elif h["mode"] == 3 and h["round"] == 1:
         for p in h["alive"]:
             h["cards"][p].append(h["deck"].pop())
         begin_betting(h, 2)
@@ -180,10 +182,10 @@ def deal_cards(h):
     h["curBet"] = 0
     h["bets"] = {p: 0 for p in h["order"]}
     h["acted"] = {p: False for p in h["order"]}
-    if h["mode"] == 3:          # 3장: 먼저 상대에게 공개할 패를 고른다
+    if h["mode"] == 3 and not h.get("twoOnly"):   # 3장: 먼저 공개할 패를 고른다
         game["phase"] = "open"
         h["phaseAt"] = time.time()
-    else:
+    else:                       # 2장 (구사 재경기 포함): 바로 베팅
         begin_betting(h, 1)
 
 
@@ -221,8 +223,10 @@ def auto_stage(h):
     maybe_finish_stage(h)
 
 
-def redeal(h, notice_msg, reveal=None):
-    """판돈은 유지한 채 살아있는 사람에게 패를 다시 돌린다 (구사·무승부 재경기)."""
+def redeal(h, notice_msg, reveal=None, two_only=False):
+    """판돈은 유지한 채 살아있는 사람에게 패를 다시 돌린다 (구사·무승부 재경기).
+    two_only=True 면 3장 모드라도 이 판만은 2장으로 승부한다 (구사 재경기 규칙)."""
+    h["twoOnly"] = two_only
     deal_cards(h)
     game["notice"] = {"msg": notice_msg, "at": time.time(), "reveal": reveal}
 
@@ -260,6 +264,7 @@ def start_hand():
         "cur": 0,
         "result": None,
         "turnAt": time.time(),
+        "twoOnly": False,       # 구사 재경기로 이 판만 2장으로 도는가
     }
     deal_cards(game["hand"])
     return None
@@ -312,7 +317,11 @@ def showdown(h, fold_winner=None):
                       for p in alive if p not in gusa)
         if not blocked:
             reveal = {players[p]["name"]: hand_cards(h, p) for p in gusa}
-            redeal(h, "멍텅구리 구사(9+4)! 재경기합니다 🔄", reveal)
+            # 구사 재경기는 3장 모드라도 2장으로만 돌린다
+            two = h["mode"] == 3
+            redeal(h, "멍텅구리 구사(9+4)! "
+                      + ("2장으로 재경기합니다 🔄" if two else "재경기합니다 🔄"),
+                   reveal, two_only=two)
             return
     best = min((evals[p][0], -evals[p][1]) for p in alive)
     top = [p for p in alive if (evals[p][0], -evals[p][1]) == best]
@@ -452,7 +461,7 @@ class Handler(BaseHTTPRequestHandler):
             if h and spid in h["order"]:
                 revealed = (game["phase"] == "showdown"
                             and spid in h["result"]["reveal"])
-                if h["mode"] == 3:
+                if h["mode"] == 3 and not h.get("twoOnly"):
                     entry["open"] = h["open"].get(spid)     # 공개한 패의 인덱스
                     if revealed:                            # 고른 2장 + 버린 1장
                         entry["cards"] = h["final"][spid]
@@ -470,7 +479,10 @@ class Handler(BaseHTTPRequestHandler):
             seats.append(entry)
         view = {
             "phase": game["phase"],
-            "mode": game["mode"],
+            "mode": game["mode"],                  # 테이블 설정 (2 / 3)
+            # 이번 판을 실제로 몇 장으로 도는가 — 구사 재경기면 3장 모드라도 2
+            "handMode": (2 if (h and h.get("twoOnly"))
+                         else (h["mode"] if h else game["mode"])),
             "round": h["round"] if h else 0,
             "seats": seats,
             "specs": sum(1 for p in players.values() if p["seat"] is None),
