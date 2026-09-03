@@ -438,6 +438,7 @@ class Handler(BaseHTTPRequestHandler):
             p = players[spid]
             entry = {
                 "seat": p["seat"], "name": p["name"], "chips": p["chips"],
+                "loans": p.get("loans", 0),        # 칩 충전(빚) 횟수
                 "me": spid == pid,
                 "dealer": h is not None and p["seat"] == game["button"],
                 "inHand": h is not None and spid in h["order"],
@@ -528,7 +529,8 @@ class Handler(BaseHTTPRequestHandler):
                     seat = free[0]
                 pid = uuid.uuid4().hex
                 players[pid] = {"name": name, "chips": START_CHIPS,
-                                "seat": seat, "seen": time.time()}
+                                "seat": seat, "seen": time.time(),
+                                "loans": 0}      # 칩 충전(빚) 횟수
                 self._send(200, {"id": pid, "seat": seat, "name": name,
                                  "url": f"http://{IP}:{PORT}"})
         elif self.path == "/action":
@@ -710,8 +712,10 @@ class Handler(BaseHTTPRequestHandler):
                 if pid in players and not in_hand \
                         and players[pid]["chips"] < ANTE:
                     players[pid]["chips"] += RECHARGE
+                    players[pid]["loans"] = players[pid].get("loans", 0) + 1
                     self._send(200, {"ok": True,
-                                     "chips": players[pid]["chips"]})
+                                     "chips": players[pid]["chips"],
+                                     "loans": players[pid]["loans"]})
                 else:
                     self._send(409, {"error": "칩이 100 미만일 때만 충전할 수 있습니다"})
         else:

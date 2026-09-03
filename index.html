@@ -106,6 +106,15 @@
     font-weight: 700; font-size: 15px; letter-spacing: .3px; color: #f2e6cb;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  /* 칩을 빌린 횟수 — 이름 옆 붉은 표 */
+  .seat .nm .loan {
+    display: inline-block; margin-left: 5px; vertical-align: 1px;
+    background: linear-gradient(#8f2b23, #601510); color: #ffd9c0;
+    border: 1px solid rgba(255,200,150,.45); border-radius: 4px;
+    font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+    font-size: 10px; font-weight: 700; letter-spacing: 0; padding: 0 4px;
+    line-height: 15px;
+  }
   .seat .chips { font-size: 12px; color: #ffd97a; }
   .seat .bet { font-size: 12px; color: #8fd48f; min-height: 15px; }
   /* 선 = 붉은 낙관 도장 */
@@ -664,6 +673,13 @@ function seatEl(s) {
   }
   const nm = document.createElement("div");
   nm.className = "nm"; nm.textContent = s.name + (s.me ? " (나)" : "");
+  if (s.loans) {                       // 칩을 빌린 횟수 — 이름 옆에 빚 표시
+    const ln = document.createElement("span");
+    ln.className = "loan";
+    ln.textContent = "빚 " + s.loans;
+    ln.title = "칩 충전 " + s.loans + "회 (" + fmt(s.loans * 10000) + ")";
+    nm.appendChild(ln);
+  }
   const ch = document.createElement("div");
   ch.className = "chips"; ch.textContent = "💰 " + fmt(s.chips);
   const bt = document.createElement("div");
