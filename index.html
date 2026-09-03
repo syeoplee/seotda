@@ -192,6 +192,25 @@
     will-change: clip-path;
   }
   .peelcover.smooth { transition: clip-path .25s ease; }
+  /* 세 번째 패를 크게 까는 창 */
+  .peelwrap.huge { width: 172px; height: 250px; }
+  .peelwrap.huge .card { width: 172px; height: 250px; font-size: 96px; border-radius: 12px; }
+  .peelwrap.huge .card .mnum { font-size: 30px; line-height: 38px; padding: 0 8px; }
+  .peelwrap.huge .card .gw { width: 32px; height: 32px; font-size: 20px; border-radius: 5px; }
+  .peelwrap.huge .peelcover {
+    border-radius: 12px; font-size: 20px; letter-spacing: 2px;
+    font-family: "Nanum Myeongjo", Batang, serif;
+    box-shadow: 0 10px 22px rgba(0,0,0,.6);
+  }
+  .thirdrow { display: flex; align-items: center; justify-content: center;
+              gap: 14px; margin: 16px 0 14px; }
+  .thirdrow .card.known {
+    width: 112px; height: 163px; border-radius: 9px; opacity: .82;
+    box-shadow: 0 6px 14px rgba(0,0,0,.5);
+  }
+  .thirdrow .card.known .mnum { font-size: 20px; line-height: 26px; padding: 0 6px; }
+  .thirdrow .card.known .gw { width: 22px; height: 22px; font-size: 14px; }
+  .thirdrow .plus { font-size: 26px; color: #d6b260; opacity: .7; }
   .peelhint {
     margin-top: 6px; font-size: 12px; color: #9fd4ff; opacity: .85;
     display: flex; align-items: center; gap: 4px;
@@ -223,13 +242,22 @@
     border: 1px solid rgba(214,178,96,.28);
     box-shadow: 0 8px 20px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,225,170,.1);
   }
-  #myrow { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-  #myhand { display: flex; gap: 8px; }
+  /* 손패 줄과 버튼 줄을 아예 분리 — 패가 늘어도 버튼은 제자리 */
+  #myrow { display: flex; flex-direction: column; gap: 12px; }
+  #handrow { display: flex; align-items: center; gap: 16px; }
+  /* 패가 2장→3장으로 늘거나 버린 패가 붙어도 폭이 안 변하게 자리를 미리 잡아둔다 */
+  #myhand { display: flex; gap: 8px; min-width: 288px; min-height: 94px; align-items: center; }
+  #myinfo { min-width: 232px; }
   #myrank { font-size: 26px; font-weight: 700; color: #ffd97a;
     font-family: "Nanum Myeongjo", Batang, serif; letter-spacing: 1px;
     text-shadow: 0 2px 6px rgba(0,0,0,.7); }
   #mychips { font-size: 14px; }
-  #controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  /* 버튼은 6칸 고정 격자 — 숨겨져도 칸은 그대로 남아서 자리가 흔들리지 않는다 */
+  #controls { display: grid; gap: 8px; grid-template-columns: repeat(6, 1fr); }
+  #controls button {
+    padding: 10px 4px; font-size: 14px; white-space: nowrap; overflow: hidden;
+  }
+  #controls button[hidden] { display: block !important; visibility: hidden; }
   button {
     background: #6b5b3e; color: #fff; border: 0; border-radius: 8px;
     padding: 10px 16px; font-size: 15px; cursor: pointer; font-family: inherit;
@@ -355,13 +383,14 @@
   <div id="resultbar" hidden></div>
 
   <div class="panel" id="myrow">
-    <div id="myhand"></div>
-    <div>
-      <div id="myrank"></div>
-      <div id="mychips"></div>
-      <div id="peelhint" class="peelhint" hidden>두 번째 패를 아래로 <span class="arrow">▼</span> 밀어서 확인</div>
+    <div id="handrow">
+      <div id="myhand"></div>
+      <div id="myinfo">
+        <div id="myrank"></div>
+        <div id="mychips"></div>
+        <div id="peelhint" class="peelhint" hidden>두 번째 패를 아래로 <span class="arrow">▼</span> 밀어서 확인</div>
+      </div>
     </div>
-    <div style="flex:1"></div>
     <div id="controls">
       <button id="dieBtn">다이</button>
       <button id="checkBtn" hidden>체크</button>
@@ -641,7 +670,8 @@ function seatEl(s) {
   bt.className = "bet";
   bt.textContent = s.inHand ? (!s.alive ? "다이" : (s.bet ? "베팅 " + fmt(s.bet) : "")) : "";
   el.append(nm, ch, bt);
-  if (s.cards) {
+  // 다이한 사람은 패를 깔지 않는다 — 그냥 죽은 자리
+  if (s.cards && !(s.inHand && !s.alive)) {
     const cs = document.createElement("div");
     cs.className = "cards";
     // 쇼다운 순차 공개 — 아직 내 차례가 안 온 자리는 뒷면으로 둔다
@@ -682,9 +712,9 @@ function myHandKey(seat, phase) {
 }
 
 // 카드 한 장에 커버를 씌우고, 아래로 밀면 까지는 요소를 만든다
-function makePeelCard(card, onReveal) {
+function makePeelCard(card, onReveal, big) {
   const wrap = document.createElement("div");
-  wrap.className = "peelwrap";
+  wrap.className = big ? "peelwrap huge" : "peelwrap";
   wrap.appendChild(cardEl(card, true));            // 밑에 깔린 실제 패
   const cover = document.createElement("div");
   cover.className = "peelcover smooth";
@@ -736,13 +766,9 @@ function refreshMyHand(seat) {
   hand.innerHTML = "";
   if (!seat || !seat.cards || seat.cards === "hidden") return;
   if (gMode === 3) {            // 3장: 처음 두 장은 바로 보이고, 세 번째 패는 밀어서 깐다
-    seat.cards.forEach((c, i) => {
-      if (i === 2 && !peeled3)
-        hand.appendChild(makePeelCard(c, () => {
-          peeled3 = true; $("peelhint").hidden = true; updateRank(seat);
-        }));
-      else hand.appendChild(cardEl(c, true));
-    });
+    // 세 번째 패는 큰 창에서 까기 전까지 손패에서도 뒷면
+    seat.cards.forEach((c, i) =>
+      hand.appendChild(cardEl(i === 2 && !peeled3 ? "hidden" : c, true)));
     if (seat.discard) {
       const dc = cardEl(seat.discard, true); dc.classList.add("discard"); dc.title = "버린 패";
       hand.appendChild(dc);
@@ -812,6 +838,37 @@ function showPeek(seat) {
   $("peek").hidden = false;
 }
 
+// 3장 모드: 세 번째 패를 큰 창에서 밀어서 까는 순간
+function showThirdPeek(seat) {
+  const box = $("peekCards"); box.innerHTML = "";
+  $("peekTitle").textContent = "세 번째 패";
+  $("peekHint").innerHTML =
+    "덮인 패를 <span style=\"color:#9fd4ff\">아래로 ▼ 밀어</span> 까세요";
+  $("peekHint").hidden = false;
+  $("peekDone").textContent = "확인"; $("peekDone").disabled = false; $("peekDone").hidden = true;
+  $("peekDone").onclick = () => { $("peek").hidden = true; };
+  const row = document.createElement("div");
+  row.className = "thirdrow";
+  seat.cards.slice(0, 2).forEach(c => {
+    const el = cardEl(c, true); el.classList.add("known"); row.appendChild(el);
+  });
+  const plus = document.createElement("span");
+  plus.className = "plus"; plus.textContent = "+";
+  row.appendChild(plus);
+  row.appendChild(makePeelCard(seat.cards[2], () => {
+    peeled3 = true;
+    updateRank(seat);
+    refreshMyHand(seat);
+    const bp = bestPair(seat.cards);
+    const name = evalHand([seat.cards[bp[0]], seat.cards[bp[1]]]);
+    $("peekHint").innerHTML =
+      "내 최고 족보 <b style=\"color:#ffd97a; font-size:19px\">" + name + "</b>";
+    $("peekDone").hidden = false;
+  }, true));
+  box.appendChild(row);
+  $("peek").hidden = false;
+}
+
 function buildMyHand(seat, phase) {
   peeled2 = false; peeled3 = false;
   $("peelhint").hidden = true;
@@ -821,10 +878,7 @@ function buildMyHand(seat, phase) {
     // 세 번째 패는 2차 베팅 때만 밀어서 깐다; 그 외(선택·승부·다이)엔 다 보인다
     if (!(phase === "betting" && seat.cards.length === 3 && seat.alive)) peeled3 = true;
     refreshMyHand(seat);
-    if (!peeled3) {
-      $("peelhint").innerHTML = "세 번째 패를 아래로 <span class=\"arrow\">▼</span> 밀어서 확인";
-      $("peelhint").hidden = false;
-    }
+    if (!peeled3) showThirdPeek(seat);      // 큰 창에서 까기
     return;
   }
   if (phase !== "betting") { peeled2 = true; refreshMyHand(seat); return; }
@@ -1009,7 +1063,8 @@ function paintSeats(seats) {
 function startReveal(d) {
   cancelReveal();
   const res = d.result, seats = d.seats || [];
-  const open = seats.filter(s => s.inHand && Array.isArray(s.cards));
+  // 다이한 사람은 깔 패가 없으니 순차 공개에서 빠진다
+  const open = seats.filter(s => s.inHand && s.alive && Array.isArray(s.cards));
   // 전원 다이처럼 깔 패가 없거나 혼자뿐이면 곧바로 결과를 보여준다
   if (res.kind === "fold" || open.length < 2) { showWinner(res, d.me, seats); return; }
   const order = open.filter(s => !res.winners.includes(s.name)).map(s => s.seat)
