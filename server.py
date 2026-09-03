@@ -1,7 +1,9 @@
-# LAN seotda (2-card) server - Python stdlib only (no pip install needed)
+# LAN seotda server - Python stdlib only (no pip install needed)
 # Run:  python server.py [port]      (default port 8002)
 # Up to 6 seated players + spectators. Server is authoritative: it holds the
 # hidden hands and sends each client only what that client may see.
+# Modes: 2장 섯다 (classic: two cards, one betting round) and 3장 섯다
+# (two cards, show one of them, bet, third card, bet again, pick 2 of 3).
 import json
 import random
 import socket
@@ -25,11 +27,14 @@ START_CHIPS = 10000
 RECHARGE = 10000
 IDLE_FOLD_SEC = 45  # auto-fold a vanished player's turn
 STALE_SEC = 60      # free the seat of a player who stopped polling
+CHOOSE_SEC = 30     # 3장 섯다: 공개 패·승부 패 선택 제한 시간 (넘기면 자동 선택)
+IN_PROGRESS = ("open", "betting", "choose")   # 판이 진행 중인 단계들
 
 lock = threading.Lock()
 players = {}        # pid -> {"name","chips","seat":int|None,"seen":ts}
 game = {
-    "phase": "lobby",   # lobby | betting | showdown
+    "phase": "lobby",   # lobby | open | betting | choose | showdown
+    "mode": 2,          # 2 = 2장 섯다, 3 = 3장 섯다
     "notice": None,     # transient toast, e.g. 멍텅구리 구사 재경기
     "button": -1,       # seat number of the dealer button
     "hand": None,
@@ -104,21 +109,121 @@ def catcher(cards):
     return None
 
 
-def redeal(h, notice_msg, reveal=None):
-    """판돈은 유지한 채 살아있는 사람에게 패를 다시 돌린다 (구사·무승부 재경기)."""
-    deck = make_deck()
-    for p in h["alive"]:
-        h["cards"][p] = [deck.pop(), deck.pop()]
+def in_progress():
+    return game["phase"] in IN_PROGRESS
+
+
+def hand_cards(h, p):
+    """승부에 쓰는 2장: 3장 모드에서는 고른 2장, 아니면 손패 그대로."""
+    if h["mode"] == 3 and p in h["final"]:
+        return h["final"][p]
+    return h["cards"][p]
+
+
+def best_pair(cards):
+    """3장 중 족보가 가장 좋은 2장의 인덱스 (선택 시간 초과 시 자동 선택용)."""
+    best = None
+    for i in range(len(cards)):
+        for j in range(i + 1, len(cards)):
+            t, v, _ = evaluate([cards[i], cards[j]])
+            if best is None or (t, -v) < best[0]:
+                best = ((t, -v), [i, j])
+    return best[1]
+
+
+def first_actor(h):
+    """베팅할 수 있는(살아있고 칩이 있는) 첫 사람의 순번, 없으면 None."""
+    for j, p in enumerate(h["order"]):
+        if p in h["alive"] and players[p]["chips"] > 0:
+            return j
+    return None
+
+
+def begin_betting(h, rnd):
+    """베팅 라운드를 (다시) 시작한다. 선 다음 사람부터."""
+    h["round"] = rnd
     h["curBet"] = 0
     h["bets"] = {p: 0 for p in h["order"]}
     h["acted"] = {p: False for p in h["order"]}
-    for j in range(len(h["order"])):
-        if h["order"][j] in h["alive"]:
-            h["cur"] = j
-            break
-    h["result"] = None
     h["turnAt"] = time.time()
     game["phase"] = "betting"
+    j = first_actor(h)
+    if j is None:               # 전원 올인: 베팅 없이 다음 단계로
+        finish_betting(h)
+        return
+    h["cur"] = j
+
+
+def finish_betting(h):
+    """베팅 라운드가 끝났다: 3장 모드면 세 번째 패 → 2차 베팅 → 패 선택, 아니면 승부."""
+    if h["mode"] == 3 and h["round"] == 1:
+        for p in h["alive"]:
+            h["cards"][p].append(h["deck"].pop())
+        begin_betting(h, 2)
+    elif h["mode"] == 3:
+        game["phase"] = "choose"
+        h["chosen"] = {}
+        h["phaseAt"] = time.time()
+    else:
+        showdown(h)
+
+
+def deal_cards(h):
+    """살아있는 사람에게 2장씩 새로 돌리고 모드에 맞는 첫 단계로 간다 (판돈 유지)."""
+    deck = make_deck()
+    for p in h["alive"]:
+        h["cards"][p] = [deck.pop(), deck.pop()]
+    h["deck"] = deck
+    h["open"], h["chosen"], h["final"], h["discard"] = {}, {}, {}, {}
+    h["result"] = None
+    h["round"] = 1
+    h["curBet"] = 0
+    h["bets"] = {p: 0 for p in h["order"]}
+    h["acted"] = {p: False for p in h["order"]}
+    if h["mode"] == 3:          # 3장: 먼저 상대에게 공개할 패를 고른다
+        game["phase"] = "open"
+        h["phaseAt"] = time.time()
+    else:
+        begin_betting(h, 1)
+
+
+def stage_pending(h):
+    """공개 패 / 승부 패 선택 단계에서 아직 안 고른 사람들."""
+    if game["phase"] == "open":
+        return [p for p in h["alive"] if p not in h["open"]]
+    if game["phase"] == "choose":
+        return [p for p in h["alive"] if p not in h["chosen"]]
+    return []
+
+
+def maybe_finish_stage(h):
+    """모두 골랐으면 다음 단계로: 공개 → 1차 베팅, 선택 → 승부."""
+    if stage_pending(h):
+        return
+    if game["phase"] == "open":
+        begin_betting(h, 1)
+    elif game["phase"] == "choose":
+        for p in h["alive"]:
+            i, j = h["chosen"][p]
+            cs = h["cards"][p]
+            h["final"][p] = [cs[i], cs[j]]
+            h["discard"][p] = next(c for k, c in enumerate(cs) if k not in (i, j))
+        showdown(h)
+
+
+def auto_stage(h):
+    """선택 시간 초과: 안 고른 사람은 첫 패 공개 / 가장 좋은 2장으로 자동 선택."""
+    for p in stage_pending(h):
+        if game["phase"] == "open":
+            h["open"][p] = 0
+        else:
+            h["chosen"][p] = best_pair(h["cards"][p])
+    maybe_finish_stage(h)
+
+
+def redeal(h, notice_msg, reveal=None):
+    """판돈은 유지한 채 살아있는 사람에게 패를 다시 돌린다 (구사·무승부 재경기)."""
+    deal_cards(h)
     game["notice"] = {"msg": notice_msg, "at": time.time(), "reveal": reveal}
 
 
@@ -142,24 +247,21 @@ def start_hand():
     while players[ordered[0]]["seat"] != game["button"]:
         ordered.append(ordered.pop(0))
     ordered.append(ordered.pop(0))          # button acts last
-    deck = make_deck()
     pot = 0
     for pid in ordered:
         players[pid]["chips"] -= ANTE
         pot += ANTE
     game["hand"] = {
+        "mode": game["mode"],
         "order": ordered,
         "alive": list(ordered),
-        "cards": {pid: [deck.pop(), deck.pop()] for pid in ordered},
+        "cards": {},
         "pot": pot,
-        "curBet": 0,
-        "bets": {pid: 0 for pid in ordered},
-        "acted": {pid: False for pid in ordered},
         "cur": 0,
         "result": None,
         "turnAt": time.time(),
     }
-    game["phase"] = "betting"
+    deal_cards(game["hand"])
     return None
 
 
@@ -179,7 +281,7 @@ def advance_turn(h):
             h["cur"] = j
             h["turnAt"] = time.time()
             return
-    showdown(h)
+    finish_betting(h)
 
 
 def showdown(h, fold_winner=None):
@@ -195,7 +297,7 @@ def showdown(h, fold_winner=None):
         }
         return
     alive = h["alive"]
-    evals = {p: evaluate(h["cards"][p]) for p in alive}
+    evals = {p: evaluate(hand_cards(h, p)) for p in alive}
 
     def is_gwang(p):    # 광땡 (tier 0 또는 1)
         return evals[p][0] <= 1
@@ -204,12 +306,12 @@ def showdown(h, fold_winner=None):
         return evals[p][0] == 2 and evals[p][1] == 10
 
     # 구사: 상대에 광땡·장땡(재대결 불가 패)이 없으면 패 공개 후 재경기
-    gusa = [p for p in alive if catcher(h["cards"][p]) == "구사"]
+    gusa = [p for p in alive if catcher(hand_cards(h, p)) == "구사"]
     if gusa:
         blocked = any(is_gwang(p) or is_jangddaeng(p)
                       for p in alive if p not in gusa)
         if not blocked:
-            reveal = {players[p]["name"]: h["cards"][p] for p in gusa}
+            reveal = {players[p]["name"]: hand_cards(h, p) for p in gusa}
             redeal(h, "멍텅구리 구사(9+4)! 재경기합니다 🔄", reveal)
             return
     best = min((evals[p][0], -evals[p][1]) for p in alive)
@@ -217,16 +319,16 @@ def showdown(h, fold_winner=None):
     top_tier, top_val, top_name = evals[top[0]][0], evals[top[0]][1], evals[top[0]][2]
     winners, catch = top, None
     if top_tier == 2 and top_val != 10:    # 땡(장땡 제외) -> 땡잡이가 잡음
-        tj = [p for p in alive if catcher(h["cards"][p]) == "땡잡이"]
+        tj = [p for p in alive if catcher(hand_cards(h, p)) == "땡잡이"]
         if tj:
             winners, catch = tj, "땡잡이"
     elif top_tier == 1:                    # 13/18광땡 -> 암행어사가 잡음 (38광땡 제외)
-        ah = [p for p in alive if catcher(h["cards"][p]) == "암행어사"]
+        ah = [p for p in alive if catcher(hand_cards(h, p)) == "암행어사"]
         if ah:
             winners, catch = ah, "암행어사"
     # 같은 패(무승부)면 재경기 — 패를 공개하고 다시 돌린다
     if len(winners) > 1 and not catch:
-        reveal = {players[p]["name"]: h["cards"][p] for p in winners}
+        reveal = {players[p]["name"]: hand_cards(h, p) for p in winners}
         redeal(h, "같은 패 무승부! 재경기합니다 🔄", reveal)
         return
     share, rem = divmod(h["pot"], len(winners))
@@ -240,8 +342,8 @@ def showdown(h, fold_winner=None):
         "hand": handname,
         "msg": names + " 승리! (" + handname + ", +"
                + f"{share:,}" + (")" if len(winners) == 1 else " 나눔)"),
-        "reveal": {p: {"cards": h["cards"][p],
-                       "name": catcher(h["cards"][p]) or evals[p][2]}
+        "reveal": {p: {"cards": hand_cards(h, p),
+                       "name": catcher(hand_cards(h, p)) or evals[p][2]}
                    for p in alive},
     }
 
@@ -251,8 +353,10 @@ def do_die(h, pid):
         h["alive"].remove(pid)
     if len(h["alive"]) == 1:
         showdown(h, fold_winner=h["alive"][0])
+    elif game["phase"] in ("open", "choose"):   # 선택 단계: 남은 사람이 다 골랐으면 진행
+        maybe_finish_stage(h)
     elif round_done(h):
-        showdown(h)
+        finish_betting(h)
     else:
         advance_turn(h)
 
@@ -309,12 +413,16 @@ class Handler(BaseHTTPRequestHandler):
                     seen = players[tp]["seen"]
                     if time.time() - max(seen, h["turnAt"]) > IDLE_FOLD_SEC:
                         do_die(h, tp)
+                # 3장: 공개 패·승부 패 선택 시간이 지나면 대신 골라 준다
+                elif game["phase"] in ("open", "choose") and h \
+                        and time.time() - h["phaseAt"] > CHOOSE_SEC:
+                    auto_stage(h)
                 # free ghost seats (closed tabs); mid-hand players are handled
                 # by the idle fold above, then swept once the hand is over
                 now = time.time()
                 for spid in seated_in_order():
                     if now - players[spid]["seen"] > STALE_SEC:
-                        if game["phase"] == "betting" and h and spid in h["alive"]:
+                        if in_progress() and h and spid in h["alive"]:
                             continue
                         players[spid]["seat"] = None
                 self._send(200, self._view(pid))
@@ -324,6 +432,7 @@ class Handler(BaseHTTPRequestHandler):
     def _view(self, pid):
         h = game["hand"]
         me = players.get(pid)
+        pending = stage_pending(h) if h else []     # 선택 단계에서 기다리는 사람들
         seats = []
         for spid in seated_in_order():
             p = players[spid]
@@ -334,20 +443,34 @@ class Handler(BaseHTTPRequestHandler):
                 "inHand": h is not None and spid in h["order"],
                 "alive": h is not None and spid in h["alive"],
                 "bet": h["bets"].get(spid, 0) if h else 0,
-                "turn": (game["phase"] == "betting" and h
-                         and h["order"][h["cur"]] == spid),
+                "turn": bool(h) and (
+                    (game["phase"] == "betting" and h["order"][h["cur"]] == spid)
+                    or spid in pending),
                 "cards": None,
             }
             if h and spid in h["order"]:
-                if spid == pid:
-                    entry["cards"] = h["cards"][spid]
-                elif game["phase"] == "showdown" and spid in h["result"]["reveal"]:
+                revealed = (game["phase"] == "showdown"
+                            and spid in h["result"]["reveal"])
+                if h["mode"] == 3:
+                    entry["open"] = h["open"].get(spid)     # 공개한 패의 인덱스
+                    if revealed:                            # 고른 2장 + 버린 1장
+                        entry["cards"] = h["final"][spid]
+                        entry["discard"] = h["discard"][spid]
+                    elif spid == pid:
+                        entry["cards"] = h["cards"][spid]
+                        entry["chosen"] = h["chosen"].get(spid)
+                    else:                                   # 공개 패만 앞면, 나머지 뒷면
+                        entry["cards"] = [c if i == entry["open"] else "hidden"
+                                          for i, c in enumerate(h["cards"][spid])]
+                elif spid == pid or revealed:
                     entry["cards"] = h["cards"][spid]
                 else:
                     entry["cards"] = "hidden"
             seats.append(entry)
         view = {
             "phase": game["phase"],
+            "mode": game["mode"],
+            "round": h["round"] if h else 0,
             "seats": seats,
             "specs": sum(1 for p in players.values() if p["seat"] is None),
             "url": f"http://{IP}:{PORT}",
@@ -362,6 +485,10 @@ class Handler(BaseHTTPRequestHandler):
             "myTurn": (game["phase"] == "betting" and h
                        and h["order"][h["cur"]] == pid),
             "myBet": h["bets"].get(pid, 0) if h else 0,
+            "pending": [players[p]["name"] for p in pending],
+            "needAct": pid in pending,
+            "phaseLeft": (max(0, int(CHOOSE_SEC - (time.time() - h["phaseAt"])))
+                          if h and game["phase"] in ("open", "choose") else 0),
             "result": h["result"] if h and game["phase"] == "showdown" else None,
             "notice": game["notice"],
         }
@@ -420,6 +547,15 @@ class Handler(BaseHTTPRequestHandler):
                 if act == "die":
                     h["acted"][pid] = True
                     do_die(h, pid)
+                elif act == "check":            # 베팅 없이 넘김 (아직 아무도 안 걸었을 때)
+                    if h["curBet"] != 0:
+                        self._send(409, {"error": "베팅이 있어 체크할 수 없습니다"})
+                        return
+                    h["acted"][pid] = True
+                    if round_done(h):
+                        finish_betting(h)
+                    else:
+                        advance_turn(h)
                 elif act == "call":
                     pay = min(h["curBet"] - my, chips)
                     players[pid]["chips"] -= pay
@@ -427,7 +563,7 @@ class Handler(BaseHTTPRequestHandler):
                     h["bets"][pid] += pay
                     h["acted"][pid] = True
                     if round_done(h):
-                        showdown(h)
+                        finish_betting(h)
                     else:
                         advance_turn(h)
                 elif act in ("bbing", "ddadang", "half"):
@@ -461,12 +597,70 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(409, {"error": "알 수 없는 액션"})
                     return
                 self._send(200, {"ok": True})
+        elif self.path == "/open":          # 3장 섯다: 상대에게 공개할 패 선택
+            with lock:
+                h = game["hand"]
+                idx = data.get("idx")
+                if game["phase"] != "open" or not h:
+                    self._send(409, {"error": "공개 패를 고르는 단계가 아닙니다"})
+                    return
+                if pid not in h["alive"]:
+                    self._send(409, {"error": "참가 중이 아닙니다"})
+                    return
+                if pid in h["open"]:
+                    self._send(409, {"error": "이미 골랐습니다"})
+                    return
+                if type(idx) is not int or idx not in (0, 1):
+                    self._send(409, {"error": "잘못된 선택입니다"})
+                    return
+                h["open"][pid] = idx
+                maybe_finish_stage(h)
+                self._send(200, {"ok": True})
+        elif self.path == "/choose":        # 3장 섯다: 승부할 2장 선택
+            with lock:
+                h = game["hand"]
+                idx = data.get("idx")
+                if game["phase"] != "choose" or not h:
+                    self._send(409, {"error": "패를 고르는 단계가 아닙니다"})
+                    return
+                if pid not in h["alive"]:
+                    self._send(409, {"error": "참가 중이 아닙니다"})
+                    return
+                if pid in h["chosen"]:
+                    self._send(409, {"error": "이미 골랐습니다"})
+                    return
+                ok = (isinstance(idx, list) and len(idx) == 2
+                      and all(type(i) is int and i in (0, 1, 2) for i in idx)
+                      and idx[0] != idx[1])
+                if not ok:
+                    self._send(409, {"error": "서로 다른 패 2장을 골라야 합니다"})
+                    return
+                h["chosen"][pid] = sorted(idx)
+                maybe_finish_stage(h)
+                self._send(200, {"ok": True})
+        elif self.path == "/mode":          # 2장 / 3장 섯다 전환 (판 진행 중엔 불가)
+            with lock:
+                mode = data.get("mode")
+                if pid not in players or players[pid]["seat"] is None:
+                    self._send(403, {"error": "착석한 플레이어만 바꿀 수 있습니다"})
+                    return
+                if in_progress():
+                    self._send(409, {"error": "판이 진행 중입니다"})
+                    return
+                if mode not in (2, 3):
+                    self._send(409, {"error": "알 수 없는 모드"})
+                    return
+                if game["mode"] != mode:
+                    game["mode"] = mode
+                    game["notice"] = {"msg": f"{players[pid]['name']} 님이 {mode}장 섯다로 바꿨습니다",
+                                      "at": time.time(), "reveal": None}
+                self._send(200, {"ok": True, "mode": game["mode"]})
         elif self.path == "/next":
             with lock:
                 if pid not in players or players[pid]["seat"] is None:
                     self._send(403, {"error": "착석한 플레이어만 가능합니다"})
                     return
-                if game["phase"] == "betting":
+                if in_progress():
                     self._send(409, {"error": "판이 진행 중입니다"})
                     return
                 err = start_hand()
@@ -478,7 +672,7 @@ class Handler(BaseHTTPRequestHandler):
             with lock:
                 if pid in players and players[pid]["seat"] is not None:
                     h = game["hand"]
-                    if game["phase"] == "betting" and h and pid in h["alive"]:
+                    if in_progress() and h and pid in h["alive"]:
                         do_die(h, pid)
                     players[pid]["seat"] = None
                 self._send(200, {"ok": True})
@@ -495,7 +689,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(409, {"error": "그 자리에 내보낼 사람이 없습니다"})
                     return
                 h = game["hand"]
-                if game["phase"] == "betting" and h and target in h.get("alive", []):
+                if in_progress() and h and target in h.get("alive", []):
                     do_die(h, target)
                 players[target]["seat"] = None      # 관전으로 내려감
                 self._send(200, {"ok": True})
@@ -512,8 +706,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/recharge":
             with lock:
                 h = game["hand"]
-                in_hand = (game["phase"] == "betting" and h
-                           and pid in h["alive"])
+                in_hand = (in_progress() and h and pid in h["alive"])
                 if pid in players and not in_hand \
                         and players[pid]["chips"] < ANTE:
                     players[pid]["chips"] += RECHARGE
