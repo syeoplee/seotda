@@ -8,14 +8,24 @@
   * { box-sizing: border-box; }
   body {
     margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    background: #1e2b1e; color: #e8e6e3;
+    color: #e8e6e3;
     font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+    /* 어두운 방 안, 판 위로만 빛이 떨어지는 느낌 */
+    background:
+      radial-gradient(ellipse 70% 55% at 50% 42%, #23331f 0%, #16200f 55%, #0b0f08 100%),
+      #0b0f08;
   }
+  .serif { font-family: "Nanum Myeongjo", Batang, "Batang", serif; }
   .outer { display: flex; gap: 12px; align-items: flex-start; justify-content: center;
     flex-wrap: wrap; padding: 12px; }
   .wrap { width: min(96vw, 860px); display: flex; flex-direction: column; gap: 10px; }
 
-  #jokbo { width: 224px; background: #33302a; border-radius: 12px; padding: 10px 12px; }
+  #jokbo {
+    width: 224px; border-radius: 12px; padding: 10px 12px;
+    background: linear-gradient(#2a2118, #1a140e);
+    border: 1px solid rgba(214,178,96,.28);
+    box-shadow: 0 8px 20px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,225,170,.1);
+  }
   .jrow { display: flex; align-items: center; gap: 5px; padding: 3px 5px; border-radius: 6px; }
   .jrow.hit { background: #5a4a2a; outline: 1px solid #ffd97a; }
   .jrow .jname { font-weight: 600; font-size: 13px; }
@@ -23,28 +33,90 @@
   .card.mini { width: 22px; height: 32px; font-size: 13px; border-radius: 4px; }
   .card.mini .gw { width: 11px; height: 11px; font-size: 7px; }
 
+  /* ── 화투판 ─────────────────────────────────────────
+     자단목 테두리 + 금테 + 초록 융, 자리는 판 둘레에 둥글게 앉힌다 */
   #table {
-    background: radial-gradient(ellipse at center, #2f6b3d, #24512f 75%);
-    border: 10px solid #5a3d22; border-radius: 24px; padding: 14px;
-    display: flex; flex-direction: column; gap: 10px;
+    position: relative; height: 524px; border-radius: 50% / 34%;
+    padding: 0;
+    background:
+      linear-gradient(#6b4526, #3f2714) padding-box,
+      linear-gradient(150deg, #d9b25f, #7a5a24 40%, #e6c777 70%, #6d4f1e) border-box;
+    border: 3px solid transparent;
+    box-shadow:
+      0 26px 60px rgba(0,0,0,.72),
+      0 0 0 1px rgba(0,0,0,.6),
+      inset 0 2px 3px rgba(255,225,160,.28);
   }
-  .seatrow { display: flex; gap: 10px; justify-content: center; }
+  /* 초록 융 */
+  #felt {
+    position: absolute; inset: 20px; border-radius: 50% / 34%;
+    background:
+      radial-gradient(ellipse 62% 62% at 50% 44%, #387d47 0%, #2b6237 46%, #1d4527 82%, #163720 100%);
+    box-shadow:
+      inset 0 0 0 2px rgba(214,178,96,.55),
+      inset 0 0 0 3px rgba(0,0,0,.45),
+      inset 0 10px 34px rgba(0,0,0,.55),
+      inset 0 -8px 26px rgba(0,0,0,.4);
+    overflow: hidden;
+  }
+  /* 융 안쪽 금색 테 한 줄 */
+  #felt::after {
+    content: ""; position: absolute; inset: 34px 58px;
+    border: 1px solid rgba(224,193,120,.22); border-radius: 50% / 40%;
+    box-shadow: inset 0 0 26px rgba(0,0,0,.35);
+    pointer-events: none;
+  }
+  #seats { position: absolute; inset: 0; }
+
   .seat {
-    background: rgba(0,0,0,.35); border-radius: 12px; padding: 8px 10px;
-    width: 150px; min-height: 96px; border: 2px solid transparent; position: relative;
+    position: absolute; transform: translate(-50%,-50%);
+    width: 146px; min-height: 96px; padding: 9px 11px 10px;
+    border-radius: 14px;
+    background: linear-gradient(#2a2118, #17120c);
+    border: 1px solid rgba(214,178,96,.4);
+    box-shadow: 0 8px 18px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,225,170,.14);
+    transition: box-shadow .2s ease, border-color .2s ease, opacity .25s ease;
   }
-  .seat.empty { opacity: .35; display: flex; align-items: center; justify-content: center;
-    font-size: 13px; }
-  .seat.turn { border-color: #ffd97a; box-shadow: 0 0 12px rgba(255,217,122,.5); }
-  .seat.me { background: rgba(20,45,80,.55); }
-  .seat.die { opacity: .45; }
-  .seat .nm { font-weight: 600; font-size: 14px; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; }
+  /* 판 둘레 여섯 자리 — 내 자리가 언제나 p0(맨 아래 가운데) */
+  .seat.p0 { left: 50%; top: 79%; }
+  .seat.p1 { left: 81%; top: 64%; }
+  .seat.p2 { left: 81%; top: 33%; }
+  .seat.p3 { left: 50%; top: 21%; }
+  .seat.p4 { left: 19%; top: 33%; }
+  .seat.p5 { left: 19%; top: 64%; }
+
+  /* 빈 자리는 방석만 놓아둔 것처럼 */
+  .seat.empty {
+    width: 104px; min-height: 0; padding: 7px 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; letter-spacing: 2px; color: rgba(232,230,227,.5);
+    background: rgba(0,0,0,.22); border: 1px dashed rgba(214,178,96,.28);
+    border-radius: 999px; box-shadow: none;
+  }
+  .seat.turn {
+    border-color: #ffd54a;
+    box-shadow: 0 0 20px rgba(255,213,74,.6), 0 8px 18px rgba(0,0,0,.55),
+                inset 0 0 14px rgba(255,213,74,.16);
+  }
+  .seat.me { background: linear-gradient(#22303f, #101820);
+             border-color: rgba(150,200,255,.45); }
+  .seat.die { opacity: .38; filter: grayscale(.5); }
+  .seat .nm {
+    font-family: "Nanum Myeongjo", Batang, serif;
+    font-weight: 700; font-size: 15px; letter-spacing: .3px; color: #f2e6cb;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .seat .chips { font-size: 12px; color: #ffd97a; }
   .seat .bet { font-size: 12px; color: #8fd48f; min-height: 15px; }
+  /* 선 = 붉은 낙관 도장 */
   .seat .badge {
-    position: absolute; top: -9px; right: -6px; background: #b98a3a; color: #fff;
-    font-size: 11px; padding: 1px 7px; border-radius: 9px; font-weight: 700;
+    position: absolute; top: -11px; right: -9px; width: 26px; height: 26px;
+    background: linear-gradient(#a3271f, #741a14); color: #ffe9c8;
+    border: 1px solid #e0b96a; border-radius: 5px;
+    font-family: "Nanum Myeongjo", Batang, serif;
+    font-size: 14px; font-weight: 700; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 3px 7px rgba(0,0,0,.6);
   }
   .seat .cards { display: flex; gap: 4px; margin-top: 5px; }
   .seat .kick {
@@ -76,10 +148,15 @@
   .card.mini .mnum { font-size: 8px; line-height: 11px; padding: 0 3px; }
   .card.back { background: repeating-linear-gradient(45deg, #27436d, #27436d 4px, #1d3457 4px, #1d3457 8px);
     border: 1px solid #40608f; }
+  /* 光 — 붉은 낙관 도장처럼 */
   .card .gw {
     position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; z-index: 2;
-    background: #e8b23a; color: #5a2d00; border-radius: 50%;
-    font-size: 9px; font-weight: 800; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(#b8332a, #7d1c16); color: #ffe9c8;
+    border: 1px solid rgba(255,220,150,.75); border-radius: 3px;
+    font-family: "Nanum Myeongjo", Batang, serif;
+    font-size: 10px; font-weight: 700; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,.6);
   }
   .card.big { width: 64px; height: 94px; font-size: 40px; border-radius: 8px; }
   .card.big .gw { width: 22px; height: 22px; font-size: 13px; }
@@ -93,7 +170,8 @@
   .pickrow { display: flex; gap: 18px; justify-content: center; padding: 12px 4px 4px; }
   .pickrow .card.big { width: 120px; height: 176px; font-size: 64px; }
   .pickrow .card.big .gw { width: 28px; height: 28px; font-size: 15px; }
-  #modetag { font-size: 12px; opacity: .7; margin-top: 2px; }
+  #modetag { font-size: 12px; opacity: .62; margin-top: 4px;
+    text-shadow: 0 1px 3px rgba(0,0,0,.85); }
   .modebtn { padding: 6px 12px; font-size: 13px; }
   .modebtn.active { background: #b98a3a; }
   .modebtn.active:hover { background: #c99a4a; }
@@ -121,14 +199,35 @@
   .peelhint .arrow { display: inline-block; animation: nudge 1.1s ease-in-out infinite; }
   @keyframes nudge { 0%,100% { transform: translateY(0); } 50% { transform: translateY(4px); } }
 
-  #center { text-align: center; padding: 4px 0; }
-  #pot { font-size: 22px; font-weight: 700; color: #ffd97a; }
-  #phasemsg { font-size: 14px; opacity: .85; min-height: 18px; margin-top: 2px; }
+  /* 판 한가운데 — 판돈 명패 */
+  #center {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    text-align: center; width: 340px; pointer-events: none;
+  }
+  #potplate {
+    display: inline-block; padding: 9px 34px 11px; border-radius: 11px;
+    background: linear-gradient(#2a2118, #14100a);
+    border: 1px solid rgba(214,178,96,.55);
+    box-shadow: 0 6px 16px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,225,170,.18);
+  }
+  #pot {
+    font-family: "Nanum Myeongjo", Batang, serif;
+    font-size: 27px; font-weight: 700; letter-spacing: 1px;
+    color: #ffd97a; text-shadow: 0 2px 6px rgba(0,0,0,.8), 0 0 16px rgba(255,200,90,.28);
+  }
+  #phasemsg { font-size: 14px; opacity: .92; min-height: 18px; margin-top: 9px;
+    text-shadow: 0 1px 4px rgba(0,0,0,.85); }
 
-  .panel { background: #33302a; border-radius: 12px; padding: 12px 14px; }
+  .panel {
+    background: linear-gradient(#2a2118, #1a140e); border-radius: 12px; padding: 12px 14px;
+    border: 1px solid rgba(214,178,96,.28);
+    box-shadow: 0 8px 20px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,225,170,.1);
+  }
   #myrow { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   #myhand { display: flex; gap: 8px; }
-  #myrank { font-size: 22px; font-weight: 700; color: #ffd97a; }
+  #myrank { font-size: 26px; font-weight: 700; color: #ffd97a;
+    font-family: "Nanum Myeongjo", Batang, serif; letter-spacing: 1px;
+    text-shadow: 0 2px 6px rgba(0,0,0,.7); }
   #mychips { font-size: 14px; }
   #controls { display: flex; gap: 8px; flex-wrap: wrap; }
   button {
@@ -146,8 +245,12 @@
   #shareurl { font-family: Consolas, monospace; color: #ffd97a; }
 
   #resultbar {
-    background: #4a4030; border: 1px solid #8a7a55; border-radius: 12px;
-    padding: 10px 14px; font-size: 16px; font-weight: 600; text-align: center;
+    background: linear-gradient(#4a3d24, #2e2515);
+    border: 1px solid rgba(214,178,96,.6); border-radius: 12px;
+    padding: 11px 14px; font-size: 18px; font-weight: 700; text-align: center;
+    font-family: "Nanum Myeongjo", Batang, serif; letter-spacing: .4px;
+    color: #ffe6ae; text-shadow: 0 2px 6px rgba(0,0,0,.7);
+    box-shadow: 0 8px 22px rgba(0,0,0,.55);
   }
   .seat.winnerseat {
     border-color: #ffd54a;
@@ -224,6 +327,15 @@
     font-family: inherit;
   }
   #pick button { display: block; width: 100%; margin: 8px auto; font-size: 16px; }
+  /* 좁은 화면에서는 둥근 배치를 포기하고 위아래로 쌓는다 */
+  @media (max-width: 780px) {
+    #table { height: auto; border-radius: 18px; padding: 14px; }
+    #felt { display: none; }
+    #seats { position: static; display: flex; flex-wrap: wrap;
+             gap: 8px; justify-content: center; }
+    .seat { position: static; transform: none; width: 150px; }
+    #center { position: static; transform: none; width: auto; margin: 12px 0; }
+  }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -231,13 +343,13 @@
 <div class="outer">
 <div class="wrap">
   <div id="table">
-    <div class="seatrow" id="row-top"></div>
+    <div id="felt"></div>
+    <div id="seats"></div>
     <div id="center">
-      <div id="pot">판돈 0</div>
+      <div id="potplate"><span id="pot">판돈 0</span></div>
       <div id="phasemsg">서버 연결 중…</div>
       <div id="modetag"></div>
     </div>
-    <div class="seatrow" id="row-bottom"></div>
   </div>
 
   <div id="resultbar" hidden></div>
@@ -438,7 +550,7 @@ function cardEl(c, big) {
   el.appendChild(num);
   if (c.g) {
     const g = document.createElement("span");
-    g.className = "gw"; g.textContent = "광";
+    g.className = "gw"; g.textContent = "光";   // 빛 광 — 한자로 찍는다
     el.appendChild(g);
   }
   return el;
@@ -883,9 +995,16 @@ function cancelReveal() {
 function paintSeats(seats) {
   const bySeat = {};
   (seats || []).forEach(s => bySeat[s.seat] = s);
-  $("row-top").innerHTML = ""; $("row-bottom").innerHTML = "";
-  for (let i = 0; i < 3; i++) $("row-top").appendChild(seatEl(bySeat[i]));
-  for (let i = 3; i < 6; i++) $("row-bottom").appendChild(seatEl(bySeat[i]));
+  // 내 자리를 판 맨 아래 가운데(p0)에 두고, 나머지는 시계 방향으로 둘러 앉힌다
+  const meSeat = (seats || []).find(s => s.me);
+  const base = meSeat ? meSeat.seat : 0;
+  const box = $("seats");
+  box.innerHTML = "";
+  for (let i = 0; i < 6; i++) {
+    const el = seatEl(bySeat[i]);
+    el.classList.add("p" + ((i - base + 6) % 6));
+    box.appendChild(el);
+  }
 }
 function startReveal(d) {
   cancelReveal();
