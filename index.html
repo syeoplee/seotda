@@ -156,6 +156,12 @@
   }
   @keyframes winglow { from { box-shadow: 0 0 10px rgba(255,213,74,.6); }
                        to { box-shadow: 0 0 26px rgba(255,213,74,.95); } }
+  /* 쇼다운 순차 공개 — 방금 뒤집힌 자리의 패 */
+  .cards.flipin .card { animation: flipin .42s cubic-bezier(.2,1.1,.4,1) backwards; }
+  .cards.flipin .card:nth-child(2) { animation-delay: .1s; }
+  .cards.flipin .card:nth-child(3) { animation-delay: .2s; }
+  @keyframes flipin { 0% { transform: rotateY(90deg) scale(.86); opacity: .2; }
+                      100% { transform: rotateY(0) scale(1); opacity: 1; } }
 
   #winbanner {
     position: fixed; inset: 0; z-index: 20; pointer-events: none;
@@ -373,6 +379,7 @@ const playWin  = () => [440, 550, 660, 880].forEach((f, i) => beep(f, i * .18, .
 let myId = sessionStorage.getItem("seotda-id");
 let prev = {phase: null, myTurn: false, needAct: false, round: 0};
 let gPhase = "lobby", gMode = 2, gWinners = [], shownResult = null, shownNotice = 0;
+let gRevealSeq = null, gRevealTimers = [];   // 쇼다운 순차 공개 (진 사람 → 이긴 사람)
 let iSeated = false, prevSeated = false, iLeft = false;
 const inProg = p => p === "open" || p === "betting" || p === "choose";   // 판 진행 중
 
@@ -497,7 +504,9 @@ function seatEl(s) {
   if (s.turn) el.classList.add("turn");
   if (s.me) el.classList.add("me");
   if (s.inHand && !s.alive) el.classList.add("die");
-  if (gPhase === "showdown" && gWinners.includes(s.name)) el.classList.add("winnerseat");
+  // 순차 공개가 끝나기 전엔 승자 표시도 하지 않는다 (미리 스포일러 방지)
+  if (gPhase === "showdown" && !gRevealSeq && gWinners.includes(s.name))
+    el.classList.add("winnerseat");
   if (s.dealer) {
     const b = document.createElement("span");
     b.className = "badge"; b.textContent = "선"; el.appendChild(b);
@@ -523,6 +532,16 @@ function seatEl(s) {
   if (s.cards) {
     const cs = document.createElement("div");
     cs.className = "cards";
+    // 쇼다운 순차 공개 — 아직 내 차례가 안 온 자리는 뒷면으로 둔다
+    if (gRevealSeq && !gRevealSeq.shown.has(s.seat)) {
+      const n = Array.isArray(s.cards) ? s.cards.length : 2;
+      for (let i = 0; i < n; i++) cs.appendChild(cardEl("hidden"));
+      if (s.discard) cs.appendChild(cardEl("hidden"));
+      el.appendChild(cs);
+      return el;
+    }
+    if (gRevealSeq && gRevealSeq.justShown === s.seat &&
+        Date.now() - gRevealSeq.justAt < 420) cs.classList.add("flipin");
     // 내 패도 베팅 중엔 뒷면으로만 보인다 (미리 안 보이게 — 밑의 손패에서 밀어서 확인)
     if (s.cards === "hidden" || (s.me && gPhase === "betting" && gMode === 2))
       cs.append(cardEl("hidden"), cardEl("hidden"));
@@ -852,6 +871,51 @@ function showNotice(notice) {
   showWinner._t = setTimeout(() => { b.hidden = true; }, 3800);
 }
 
+/* ── 쇼다운 순차 공개 ────────────────────────────────
+   진 사람부터 한 명씩 패를 까고, 이긴 사람이 마지막에 열린다.
+   다 열린 뒤에야 결과 문구와 승자 배너가 뜬다.                */
+const REVEAL_STEP = 750;
+function cancelReveal() {
+  gRevealTimers.forEach(clearTimeout);
+  gRevealTimers = [];
+  gRevealSeq = null;
+}
+function paintSeats(seats) {
+  const bySeat = {};
+  (seats || []).forEach(s => bySeat[s.seat] = s);
+  $("row-top").innerHTML = ""; $("row-bottom").innerHTML = "";
+  for (let i = 0; i < 3; i++) $("row-top").appendChild(seatEl(bySeat[i]));
+  for (let i = 3; i < 6; i++) $("row-bottom").appendChild(seatEl(bySeat[i]));
+}
+function startReveal(d) {
+  cancelReveal();
+  const res = d.result, seats = d.seats || [];
+  const open = seats.filter(s => s.inHand && Array.isArray(s.cards));
+  // 전원 다이처럼 깔 패가 없거나 혼자뿐이면 곧바로 결과를 보여준다
+  if (res.kind === "fold" || open.length < 2) { showWinner(res, d.me, seats); return; }
+  const order = open.filter(s => !res.winners.includes(s.name)).map(s => s.seat)
+        .concat(open.filter(s => res.winners.includes(s.name)).map(s => s.seat));
+  gRevealSeq = {order, shown: new Set(), justShown: null, justAt: 0, seats};
+  order.forEach((seat, i) => {
+    gRevealTimers.push(setTimeout(() => {
+      if (!gRevealSeq) return;
+      gRevealSeq.shown.add(seat);
+      gRevealSeq.justShown = seat;
+      gRevealSeq.justAt = Date.now();
+      beep(460 + i * 70, 0, .09, .05, "triangle");
+      paintSeats(gRevealSeq.seats);
+    }, REVEAL_STEP * (i + 1)));
+  });
+  gRevealTimers.push(setTimeout(() => {
+    const seatsNow = gRevealSeq ? gRevealSeq.seats : seats;
+    cancelReveal();                    // 이제부터는 전부 공개 + 승자 하이라이트
+    $("resultbar").hidden = false;
+    $("resultbar").textContent = res.msg;
+    paintSeats(seatsNow);
+    showWinner(res, d.me, seatsNow);
+  }, REVEAL_STEP * (order.length + 1)));
+}
+
 function render(d) {
   if (d.wan) { $("wanrow").hidden = false; $("wanurl").textContent = d.wan; }
   else $("wanrow").hidden = true;
@@ -869,13 +933,10 @@ function render(d) {
   }
   // 승자 배너 (결과가 새로 나올 때 한 번)
   const sig = d.result ? d.result.msg : null;
-  if (sig && sig !== shownResult) { shownResult = sig; showWinner(d.result, d.me, d.seats); }
-  if (!sig) shownResult = null;
-  const bySeat = {};
-  d.seats.forEach(s => bySeat[s.seat] = s);
-  $("row-top").innerHTML = ""; $("row-bottom").innerHTML = "";
-  for (let i = 0; i < 3; i++) $("row-top").appendChild(seatEl(bySeat[i]));
-  for (let i = 3; i < 6; i++) $("row-bottom").appendChild(seatEl(bySeat[i]));
+  if (sig && sig !== shownResult) { shownResult = sig; startReveal(d); }
+  if (!sig) { shownResult = null; cancelReveal(); }
+  if (gRevealSeq) gRevealSeq.seats = d.seats;   // 공개 중에도 칩·베팅은 최신으로
+  paintSeats(d.seats);
 
   $("pot").textContent = "판돈 " + fmt(d.pot);
   $("modetag").textContent = gMode === 3
@@ -900,10 +961,13 @@ function render(d) {
     $("phasemsg").textContent =
       (gMode === 3 ? (d.round === 2 ? "2차 베팅 — " : "1차 베팅 — ") : "") +
       (d.myTurn ? "내 차례입니다 — 베팅하세요!" : d.turnName + " 님의 차례…");
-  else $("phasemsg").textContent = "판 종료 — '다음 판'을 누르세요";
+  else $("phasemsg").textContent = gRevealSeq
+    ? "패를 공개합니다…"
+    : "판 종료 — '다음 판'을 누르세요";
 
-  $("resultbar").hidden = !d.result;
-  if (d.result) $("resultbar").textContent = d.result.msg;
+  // 순차 공개가 끝나기 전엔 결과 문구를 숨긴다 (누가 이겼는지 미리 새지 않게)
+  $("resultbar").hidden = !d.result || !!gRevealSeq;
+  if (d.result && !gRevealSeq) $("resultbar").textContent = d.result.msg;
 
   const meSeat = d.seats.find(s => s.me);
   const key = myHandKey(meSeat, d.phase);
