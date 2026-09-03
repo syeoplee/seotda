@@ -23,8 +23,8 @@ ROOT = Path(__file__).resolve().parent
 
 ANTE = 100          # 기본 판돈
 BBING = 100         # 삥
-START_CHIPS = 10000
-RECHARGE = 10000
+START_CHIPS = 100_000_000     # 1억
+RECHARGE = 100_000_000        # 빌릴 때마다 1억
 IDLE_FOLD_SEC = 45  # auto-fold a vanished player's turn
 STALE_SEC = 60      # free the seat of a player who stopped polling
 CHOOSE_SEC = 30     # 3장 섯다: 공개 패·승부 패 선택 제한 시간 (넘기면 자동 선택)
@@ -488,8 +488,10 @@ class Handler(BaseHTTPRequestHandler):
             "specs": sum(1 for p in players.values() if p["seat"] is None),
             "url": f"http://{IP}:{PORT}",
             "wan": wan_url(),
+            "recharge": RECHARGE,
             "me": None if not me else {
                 "name": me["name"], "chips": me["chips"], "seat": me["seat"],
+                "loans": me.get("loans", 0),
             },
             "pot": h["pot"] if h else 0,
             "curBet": h["curBet"] if h else 0,
@@ -730,6 +732,25 @@ class Handler(BaseHTTPRequestHandler):
                                      "loans": players[pid]["loans"]})
                 else:
                     self._send(409, {"error": "칩이 100 미만일 때만 충전할 수 있습니다"})
+        elif self.path == "/repay":         # 빚 청산 — 갚을 수 있는 만큼 한 번에
+            with lock:
+                h = game["hand"]
+                in_hand = (in_progress() and h and pid in h["alive"])
+                p = players.get(pid)
+                if not p:
+                    self._send(403, {"error": "참가자가 아닙니다"})
+                elif in_hand:
+                    self._send(409, {"error": "판이 끝난 뒤에 갚을 수 있습니다"})
+                elif p.get("loans", 0) <= 0:
+                    self._send(409, {"error": "갚을 빚이 없습니다"})
+                elif p["chips"] < RECHARGE:
+                    self._send(409, {"error": "한 번치(1억)도 갚을 칩이 없습니다"})
+                else:
+                    n = min(p["loans"], p["chips"] // RECHARGE)
+                    p["chips"] -= n * RECHARGE
+                    p["loans"] -= n
+                    self._send(200, {"ok": True, "repaid": n,
+                                     "chips": p["chips"], "loans": p["loans"]})
         else:
             self._send(404, {"error": "not found"})
 
