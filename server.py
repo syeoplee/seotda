@@ -21,8 +21,8 @@ import os
 PORT = int(os.environ.get("PORT") or (sys.argv[1] if len(sys.argv) > 1 else 8002))
 ROOT = Path(__file__).resolve().parent
 
-ANTE = 100          # 기본 판돈
-BBING = 100         # 삥
+ANTE = 1_000_000    # 기본 판돈 (100만)
+BBING = 1_000_000   # 삥 (100만)
 START_CHIPS = 100_000_000     # 1억
 RECHARGE = 100_000_000        # 빌릴 때마다 1억
 IDLE_FOLD_SEC = 45  # auto-fold a vanished player's turn
@@ -241,7 +241,7 @@ def start_hand():
     game["notice"] = None
     eligible = [pid for pid in seated_in_order() if players[pid]["chips"] >= ANTE]
     if len(eligible) < 2:
-        return "참가 가능한 인원이 2명 미만입니다 (기본판돈 100 필요)"
+        return (f"참가 가능한 인원이 2명 미만입니다 (기본판돈 {ANTE:,} 필요)")
     # rotate the dealer button to the next eligible seat
     seats = sorted(players[pid]["seat"] for pid in eligible)
     nxt = [s for s in seats if s > game["button"]]
@@ -489,6 +489,8 @@ class Handler(BaseHTTPRequestHandler):
             "url": f"http://{IP}:{PORT}",
             "wan": wan_url(),
             "recharge": RECHARGE,
+            "ante": ANTE,
+            "bbing": BBING,
             "me": None if not me else {
                 "name": me["name"], "chips": me["chips"], "seat": me["seat"],
                 "loans": me.get("loans", 0),
@@ -731,7 +733,7 @@ class Handler(BaseHTTPRequestHandler):
                                      "chips": players[pid]["chips"],
                                      "loans": players[pid]["loans"]})
                 else:
-                    self._send(409, {"error": "칩이 100 미만일 때만 충전할 수 있습니다"})
+                    self._send(409, {"error": f"칩이 {ANTE:,} 미만일 때만 충전할 수 있습니다"})
         elif self.path == "/repay":         # 빚 청산 — 갚을 수 있는 만큼 한 번에
             with lock:
                 h = game["hand"]

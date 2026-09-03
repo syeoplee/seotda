@@ -404,7 +404,7 @@
       <button id="dieBtn">다이</button>
       <button id="checkBtn" hidden>체크</button>
       <button id="callBtn">콜</button>
-      <button id="bbingBtn">삥 (100)</button>
+      <button id="bbingBtn">삥</button>
       <button id="ddadangBtn">따당</button>
       <button id="halfBtn">하프</button>
     </div>
@@ -531,6 +531,7 @@ let myId = sessionStorage.getItem("seotda-id");
 let prev = {phase: null, myTurn: false, needAct: false, round: 0};
 let gPhase = "lobby", gMode = 2, gTableMode = 2, gWinners = [], shownResult = null, shownNotice = 0;
 let gRecharge = 100000000;    // 칩 충전 한 번치 (서버가 알려준다)
+let gBbing = 1000000;         // 삥 액수 (서버가 알려준다)
 let gRevealSeq = null, gRevealTimers = [];   // 쇼다운 순차 공개 (진 사람 → 이긴 사람)
 let iSeated = false, prevSeated = false, iLeft = false;
 const inProg = p => p === "open" || p === "betting" || p === "choose";   // 판 진행 중
@@ -1116,6 +1117,7 @@ function render(d) {
   gMode = (d.handMode || d.mode) === 3 ? 3 : 2;
   gTableMode = d.mode === 3 ? 3 : 2;      // 테이블 설정 (모드 버튼 표시용)
   if (d.recharge) gRecharge = d.recharge;
+  if (d.bbing) gBbing = d.bbing;
   gWinners = d.result ? d.result.winners : [];
   iSeated = !!(d.me && d.me.seat != null);
   // 내가 방금 자리를 잃었는데 스스로 나간 게 아니면 = 강퇴됨
@@ -1187,7 +1189,8 @@ function render(d) {
   $("checkBtn").disabled = !inGame || d.curBet !== 0;
   $("callBtn").disabled = !inGame || d.curBet === 0;
   $("callBtn").textContent = "콜" + (inGame && d.curBet > 0 ? " (" + fmt(Math.min(callNeed, chips)) + ")" : "");
-  $("bbingBtn").disabled = !inGame || d.curBet !== 0 || chips < 100;
+  $("bbingBtn").disabled = !inGame || d.curBet !== 0 || chips < gBbing;
+  $("bbingBtn").textContent = "삥 (" + fmt(gBbing) + ")";
   $("ddadangBtn").disabled = !inGame || d.curBet === 0 || chips < ddNeed;
   $("ddadangBtn").textContent = "따당" + (inGame && d.curBet > 0 ? " (" + fmt(ddNeed) + ")" : "");
   $("halfBtn").disabled = !inGame || d.curBet === 0 || chips < halfNeed;
